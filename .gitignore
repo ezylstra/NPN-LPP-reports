@@ -2,3 +2,7 @@
 .Rhistory
 .RData
 .Ruserdata
+
+# npn-data (because they're often big files)
+npn-data/*
+!npn-data/.gitkeep
