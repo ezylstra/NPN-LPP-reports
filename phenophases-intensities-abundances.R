@@ -11,12 +11,12 @@ rm(list = ls())
 
 #- Phenophases ----------------------------------------------------------------#
 # Extract list of phenophases in NPN database
-# Returns dataframe with phenophase id, name, category, and class_id
 ph <- npn_phenophases() %>% 
   select(-color) %>%
   rename(class_id = pheno_class_id,
          category = phenophase_category) %>% 
   data.frame() 
+# Returns dataframe with phenophase id, name, category, and class_id
 # Note: phenophase_name does not always match up with phenophase_description
 # in the status-intensity datasets because the descriptions often tack on a 
 # parenthetical reference to a taxonomic group (eg, forbs, birds).
@@ -100,12 +100,65 @@ count(ph, pheno_group, category, class_name)
 # Write phenophase table to file
 write.csv(ph, "phenophases.csv", row.names = FALSE)
 
-#- Intensities ----------------------------------------------------------------#
+#- Intensities and Abundances -------------------------------------------------#
+# Extract list of intensity and abundance categroes in NPN database
+ia <- npn_abundance_categories() 
+# Returns tibble with category ids, each with a dataframe that lists the value
+# ids and value names (which is what appears in intensity_value column in a
+# status-intensity dataset)
+
+# Remove blank entry 
+ia <- ia %>%
+  filter(!(is.na(category_name) | category_name == ""))
+
+# Create a 2-dim dataframe that contains all the data
+cat_ids <- select(ia, category_id, category_name) %>% data.frame()
+cat_values <- ia$category_values
+cat_values <- mapply(cbind, cat_values, "category_id" = cat_ids$category_id, 
+                     SIMPLIFY = FALSE)
+cat_values <- mapply(cbind, cat_values, "category_name" = cat_ids$category_name, 
+                     SIMPLIFY = FALSE)
+ia2 <- bind_rows(cat_values) %>%
+  select(category_id, category_name, value_id, value_name, value_description)
+
+# Identify whether values are a number, percent, or qualitative and 
+# extract if not qualitative, extract bounding values to calculate a midpoint
+# or representative number
+value_names <- sort(unique(ia2$value_name))
+values <- data.frame(value_names = value_names)
+values <- values %>%
+  mutate(value1 = NA,
+         value2 = NA,
+         type = case_when(
+           str_detect(value_names, "%") ~ "percent",
+           str_detect(value_names, "[0-9]") ~ "numeric",
+           .default = "qualitative"
+         ))
+for (i in 1:nrow(values)) {
+  if (str_detect(value_names[i], " to ")) {
+    values[i, 2:3] <- str_split_fixed(value_names[i], " to ", 2)
+    values[i, 2:3] <- as.numeric(str_remove(values[i, 2:3], ","))
+  } else if (str_detect(value_names[i], "-")) {
+    values[i, 2:3] <- str_split_fixed(value_names[i], "-", 2)
+    values[i, 3] <- str_remove(values[i, 3], "%")
+  } else if (str_detect(value_names[i], "% or more")) {
+    values[i, 2:3] <- str_remove(value_names[i], "% or more")
+  } else if (str_detect(value_names[i], "Less than ")) {
+    values[i, 2] <- 0
+    values[i, 3] <- str_remove(value_names[i], "Less than ")
+    values[i, 3] <- str_remove(values[i, 3], "%")
+  } else if (str_detect(value_names[i], "More than ")) {
+    values[i, 2:3] <- str_remove(value_names[i], "More than ")
+    values[i, 2] <- as.numeric(str_remove(values[i, 2], ",")) + 1
+    values[i, 3] <- as.numeric(str_remove(values[i, 3], ",")) + 1
+  }
+}
+
+#- PICK UP HERE ---------------------------------------------------------------#
+# Calculate a midpoint... (or easy middlish value)
 
 
 
-
-#- Abundances -----------------------------------------------------------------#
 
 
 
