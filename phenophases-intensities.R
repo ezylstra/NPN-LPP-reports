@@ -9,6 +9,10 @@ require(stringr)
 
 rm(list = ls())
 
+# Logical indicating whether to replace csvs that list phenophase, intensity, 
+# and abundance values if they already exist
+replace <- FALSE
+
 #- Phenophases ----------------------------------------------------------------#
 # Extract list of phenophases in NPN database
 ph <- npn_phenophases() %>% 
@@ -98,16 +102,19 @@ ph <- ph %>%
 count(ph, pheno_group, category, class_name)
 
 # Write phenophase table to file
-write.csv(ph, "phenophases.csv", row.names = FALSE)
+pheno_file <- "phenophases.csv"
+if (!file.exists(pheno_file) | replace) {
+  write.csv(ph, pheno_file, row.names = FALSE)
+}
 
-#- Intensities and Abundances -------------------------------------------------#
-# Extract list of intensity and abundance categroes in NPN database
+#- Intensities ----------------------------------------------------------------#
+# Extract list of intensity categories in NPN database
 ia <- npn_abundance_categories() 
 # Returns tibble with category ids, each with a dataframe that lists the value
 # ids and value names (which is what appears in intensity_value column in a
 # status-intensity dataset)
 
-# Remove blank entry 
+# Remove any blank entries 
 ia <- ia %>%
   filter(!(is.na(category_name) | category_name == ""))
 
@@ -121,44 +128,83 @@ cat_values <- mapply(cbind, cat_values, "category_name" = cat_ids$category_name,
 ia2 <- bind_rows(cat_values) %>%
   select(category_id, category_name, value_id, value_name, value_description)
 
-# Identify whether values are a number, percent, or qualitative and 
-# extract if not qualitative, extract bounding values to calculate a midpoint
+# Identify whether values are a number/count, percent, or qualitative and 
+# if not qualitative, extract bounding values to calculate a midpoint
 # or representative number
-value_names <- sort(unique(ia2$value_name))
-values <- data.frame(value_names = value_names)
+value_name <- sort(unique(ia2$value_name))
+values <- data.frame(value_name = value_name)
 values <- values %>%
   mutate(value1 = NA,
          value2 = NA,
          type = case_when(
-           str_detect(value_names, "%") ~ "percent",
-           str_detect(value_names, "[0-9]") ~ "numeric",
+           str_detect(value_name, "%") ~ "percent",
+           str_detect(value_name, "[0-9]") ~ "number",
            .default = "qualitative"
          ))
 for (i in 1:nrow(values)) {
-  if (str_detect(value_names[i], " to ")) {
-    values[i, 2:3] <- str_split_fixed(value_names[i], " to ", 2)
+  if (str_detect(value_name[i], " to ")) {
+    values[i, 2:3] <- str_split_fixed(value_name[i], " to ", 2)
     values[i, 2:3] <- as.numeric(str_remove(values[i, 2:3], ","))
-  } else if (str_detect(value_names[i], "-")) {
-    values[i, 2:3] <- str_split_fixed(value_names[i], "-", 2)
+  } else if (str_detect(value_name[i], "-")) {
+    values[i, 2:3] <- str_split_fixed(value_name[i], "-", 2)
     values[i, 3] <- str_remove(values[i, 3], "%")
-  } else if (str_detect(value_names[i], "% or more")) {
-    values[i, 2:3] <- str_remove(value_names[i], "% or more")
-  } else if (str_detect(value_names[i], "Less than ")) {
+  } else if (str_detect(value_name[i], "% or more")) {
+    values[i, 2:3] <- str_remove(value_name[i], "% or more")
+  } else if (str_detect(value_name[i], "Less than ")) {
     values[i, 2] <- 0
-    values[i, 3] <- str_remove(value_names[i], "Less than ")
+    values[i, 3] <- str_remove(value_name[i], "Less than ")
     values[i, 3] <- str_remove(values[i, 3], "%")
-  } else if (str_detect(value_names[i], "More than ")) {
-    values[i, 2:3] <- str_remove(value_names[i], "More than ")
+  } else if (str_detect(value_name[i], "More than ")) {
+    values[i, 2:3] <- str_remove(value_name[i], "More than ")
     values[i, 2] <- as.numeric(str_remove(values[i, 2], ",")) + 1
     values[i, 3] <- as.numeric(str_remove(values[i, 3], ",")) + 1
   }
 }
 
-#- PICK UP HERE ---------------------------------------------------------------#
-# Calculate a midpoint... (or easy middlish value)
+values <- values %>%
+  mutate_at(c("value1", "value2"), as.numeric) %>%
+  arrange(type, value1)
 
+# Assigning a middle-ish value for each range (For count ranges, keeping it to 
+# nice numbers like 5, 50, 500, and 5000)
+values <- values %>%
+  mutate(mag = nchar(value1) - 1) %>%
+  mutate(value = case_when(
+    value1 == value2 ~ round(value1),
+    type == "number" & value1 == 0 ~ 1,
+    type == "number" & value1 != 0 ~ 
+      plyr::round_any(rowMeans(across(value1:value2)), 5 * (10 ^ mag)),
+    type == "percent" ~ round(rowMeans(across(value1:value2))),
+    .default = NA
+  )) %>%
+  select(-mag)
 
+# Append middle values to full list of intensities
+ia2 <- ia2 %>%
+  left_join(select(values, value_name, type, value), by = "value_name") %>%
+  arrange(category_id, value_id)
 
+# For qualitative categories, create integer values from 1 to n
+#TODO: Decide whether we want to assign more meaningful values to qualitative categories
+ia2 <- ia2 %>%
+  group_by(category_id) %>%
+  mutate(value = case_when(
+    is.na(value) ~ value_id - min(value_id) + 1,
+    .default = value
+  ))
+# There are a few categories with "(peak)" in the name that have number ranges
+# along with a "peak" value_id without a number, which has been labeled as
+# quantitative using the rules above. Not sure how often these categories are 
+# being used, but for now, make value 1 greater than the largest number in 
+# category
+for (i in 2:nrow(ia2)) {
+  ia2$value[i] <- ifelse(ia2$category_id[i] == ia2$category_id[i - 1] & 
+                         ia2$value[i] < ia2$value[i - 1],
+                         ia2$value[i - 1] + 1, ia2$value[i])
+} 
+ia2 <- data.frame(ia2)
 
-
-
+ia_file <- "intensities.csv"
+if (!file.exists(ia_file) | replace) {
+  write.csv(ia2, ia_file, row.names = FALSE)
+}
