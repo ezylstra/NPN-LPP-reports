@@ -76,12 +76,7 @@ si <- si %>%
   rename(person_id = observedby_person_id)
 
 # Remove any duplicate records (all entries the same except observation_id)
-si <- si %>% distinct(across(-observation_id), .keep_all = TRUE)
-#TODO: Probably don't need to keep observation_id with .keep_all arg
-
-# Was going to remove records with unknown phenophase_status (-1) here, but
-# I'll wait since it's possible some values could be inferred from reports of 
-# other phenophases.
+si <- si %>% distinct(across(-observation_id))
 
 # Append phenophase "groups"
 pheno_list <- read.csv("phenophases.csv")
@@ -89,84 +84,182 @@ si <- left_join(si, select(pheno_list, phenophase_id, pheno_group),
                 by = "phenophase_id")
 
 # Append intensity midpoints (or single values)
+intensity_list <- read.csv("intensities.csv")
+intensity_list <- intensity_list %>%
+  select(category_id, value_name, type, value) %>%
+  rename(intensity_category_id = category_id, 
+         intensity_value = value_name, 
+         intensity_type = type,
+         intensity = value)
+si <- left_join(si, intensity_list, 
+                by = c("intensity_category_id", "intensity_value"))
+
+#- Is it necessary to do any checks of site locations? ------------------------#
+# Given that LPPs probably have a limited number of sites that were set up by 
+# a LPL, going to skip this step for now
+
+#- Extract site, species information ------------------------------------------#
+# Removing to keep working objects smaller. Can merge site, species information 
+# back in at any point (Note: for animals, individual_id is unique for each 
+# combination of species and site)
+
+sites <- si %>%
+  group_by(site_id, site_name, latitude, longitude, 
+           elevation_in_meters, state) %>%
+  summarize(n_plant_spp = length(unique(species_id[kingdom == "Plantae"])),
+            n_animal_spp = length(unique(species_id[kingdom == "Animalia"])),
+            n_observers = length(unique(person_id)),
+            n_yrs = length(unique(yr)),
+            yr_first = min(yr),
+            yr_last = max(yr),
+            .groups = "keep") %>%
+  data.frame()
+
+species <- si %>%
+  group_by(kingdom, species_id, genus, common_name) %>%
+  summarize(n_sites = length(unique(site_id)),
+            n_individuals = length(unique(individual_id)),
+            n_observers = length(unique(person_id)),
+            n_yrs = length(unique(yr)),
+            yr_first = min(yr),
+            yr_last = max(yr),
+            .groups = "keep") %>%
+  data.frame()
+
+# Remove columns we no longer need
+si <- si %>%
+  select(-c(site_name, latitude, longitude, elevation_in_meters, state,
+            species_id, genus))
+
+#- Clean up phenophase status data --------------------------------------------#
+# Any phenophase_status == -1 when intensity/abundance value present?
+count(si, phenophase_status, is.na(intensity_value), is.na(abundance_value))
+# Apparently, this does happen.
+#TODO: QA/QC fix. Can this be prevented when entering data?
+
+# Change unknown phenophase_status to 1 if an intensity/abundance value reported
+# and then remove any remaining records with phenophase status unknown
+si <- si %>%
+  mutate(phenophase_status = case_when(
+    !is.na(intensity_value) ~ 1,
+    !is.na(abundance_value) ~ 1,
+    .default = phenophase_status
+  )) %>%
+  filter(phenophase_status %in% c(0, 1))
+
+# Check that phenophase status is 1 if there is an intenstity/abundance value
+count(si, phenophase_status, is.na(intensity), is.na(abundance_value))
+
+#- Dealing with multiple observations by the same person ----------------------#
+# Same plant or animal (same site), same phenophase, same date - same observer
+
+#TODO: Figure out if/where we want QA/QC (within indiv-date-observer) to happen
+
+# For now, will keep record with more advanced phenophase or higher intensity or
+# abundance value. Will do this by sorting observations and keeping only the 
+# first
+idop <- si %>%
+  group_by(common_name, individual_id, obsdate, person_id, phenophase_id) %>%
+  summarize(n_obs = n(),
+            .groups = "keep") %>%
+  data.frame()
+idop$obsnum <- 1:nrow(idop)
+
+si <- si %>%
+  arrange(person_id, individual_id, obsdate, phenophase_id, 
+          desc(phenophase_status), desc(intensity), desc(abundance_value)) %>%
+  left_join(select(idop, -c(n_obs, common_name)), 
+            by = c("person_id", "individual_id", 
+                   "obsdate", "phenophase_id")) %>%
+  # Create "dups" column, where dups > 1 indicates that the observation can be
+  # removed since there's another observation that same day with more advanced
+  # phenology or higher intensity/abundance.
+  mutate(dups = sequence(rle(as.character(obsnum))$lengths))
+
+# Remove extra observations and unnecessary columns
+si <- si %>%
+  filter(dups == 1) %>%
+  select(-c(obsnum, dups)) %>%
+  arrange(common_name, obsdate, person_id, phenophase_id)
+
+#- Dealing with multiple observations by different people ---------------------#
+# Same plant or animal, same phenophase, same date - different observers
+
+# For plants, multiple observations of the same individual and phenophase on the 
+# same date can tell us about inter-observer variation (assuming phenophase 
+# status and intensity doesn't change).
+# For animals, multiple observations of the same species at a site on the same
+# date provides a confounded measure of inter-observer variation and variation 
+# in abundance or activity of the species.
+
+# To summarize sampling intensity (when and where observations were made), 
+# probably best to keep all the observations in the dataset. 
+
+# To analyze phenophase onsets or animal activity/occurrence, probably best
+# to subset observations so there is a maximum of one record for each 
+# phenophase associated with a plant/animal at a given site each day.
+ido <- si %>%
+  group_by(common_name, individual_id, obsdate, phenophase_id) %>%
+  summarize(n_obs = n(),
+            .groups = "keep") %>%
+  data.frame()
+ido$obsnum <- 1:nrow(ido)
+
+# For an animal species, multiple observations doesn't seem too problematic 
+# because a status = 0 could easily be a detection issue. If we assume there are
+# no false positives, then we can simply use the maximum status value and 
+# maximum intensity or abundance values.
+
+# For an individual plant, we have some choices about how to characterize
+# the phenological state and intensity (if recorded) when multiple observations
+# were made: 
+# 1) retain one observation of the plant per day.
+# 2) retain all data, use status = 1 observations, and for intensity, average 
+#    over values
+
+si_sub_animals <- si %>%
+  filter(kingdom == "Animalia") %>%
+  arrange(common_name, individual_id, obsdate, phenophase_id, 
+          desc(phenophase_status), desc(abundance_value), desc(intensity)) %>%
+  left_join(select(ido, -c(n_obs, common_name)),
+            by = c("individual_id", "obsdate", "phenophase_id")) %>%
+  mutate(dups = sequence(rle(as.character(obsnum))$lengths)) %>%
+  filter(dups == 1) %>%
+  select(-c(obsnum, dups)) %>%
+  arrange(common_name, obsdate, person_id, phenophase_id)
+  
+
+#- PICK UP HERE ---------------------------------------------------------------#
+
+#TODO: After removing multiple observations of the same phenophase, we'll 
+# aggregate information within pheno group 
 
 
-# Append abundance midpoints (or single values)
 
+#- OLD STUFF ------------------------------------------------------------------#
 
-
-#- Quick overviews of data ----------------------------------------------------#
+#- Quick overview of data -----------------------------------------------------#
 # Data dimensions
 dim(si) # 528,810
 count(si, site_name); sort(count(si, site_name)$n) # 105 sites (5 with < 50 records)
 count(si, yr) # 2012-2023, but only 7 and 149 records in 2012, 2013 
 count(filter(si, kingdom == "Plantae"), common_name)   # 21 plant spp ('ohi'a lehua with 28, rest with > 1900)
 count(filter(si, kingdom == "Animalia"), common_name)  # 7 animal spp (but monarch only 1 record)
-count(si, phenophase_description) # 41
 
-# How many phenophases were recorded for each species?
+# How many phenophases recorded across, within species?
+count(si, phenophase_description) # 41 phenophases
+count(si, pheno_group)            # 9 phenophase "groups"
 spp_ph <- si %>%
   group_by(kingdom, common_name) %>%
   summarize(n_phenophases = length(unique(phenophase_description)),
+            n_phenogroups = length(unique(pheno_group)),
             .groups = "keep") %>%
   data.frame()
-spp_ph # Except for monarch, 6-13 phenophases per spp
-# How many species for each phenophase?
-ph_spp <- si %>%
-  group_by(kingdom, phenophase_description) %>%
-  summarize(n_spp = length(unique(common_name)),
-            .groups = "keep") %>%
-  data.frame()
-ph_spp # 1-21 species per phenophase
+spp_ph 
+# For animals: 7-13 phenophases, 1-3 phenogroups per species (excl monarchs)
+# For plants: 6-11 phenophases, 5-6 phenogroups per species
 
-#- Where possible, impute phenophase status -----------------------------------#
-# Any phenophase_status == -1 when intensity/abundance value present?
-count(si, phenophase_status, is.na(intensity_value), is.na(abundance_value))
-# Apparently, this does happen.
-#TODO: QA/QC fix. Can this be prevented in the app?
-
-# Change unknown phenophase_status to 1 if an intensity/abundance value reported
-si <- si %>%
-  mutate(phenophase_status = case_when(
-    !is.na(intensity_value) ~ 1,
-    !is.na(abundance_value) ~ 1,
-    .default = phenophase_status
-  ))
-
-
-
-#- PICK UP HERE ---------------------------------------------------------------#
-# Want to summarize the number of observations. Here, defining an observation as 
-# all the data collected on a plant or an animal species by an observer on a 
-# particular date. 
-
-# Summarize information associated with each observation
-obs <- si %>%
-  group_by(kingdom, common_name, individual_id, obsdate, yr, person_id) %>%
-  summarize(n = n(),
-            n_ph = length(unique(phenophase_description)),
-            n_ph_unk = sum(phenophase_status == -1),
-            .groups = "keep") %>%
-  data.frame()
-
-count(obs, n, n_ph, n_ph_unk, name = "count")
-count(obs, kingdom, n == n_ph, n_ph_unk > 0, name = "count") 
-# 50 times an observer monitored a plant multiple times in one day
-# Check an example where this occurred when phenophase status was always known
-head(filter(obs, n > n_ph, n_ph_unk == 0))
-si %>%
-  filter(common_name == "Bigelow's sedge",
-         individual_id == 59773,
-         obsdate == "2018-06-16", 
-         person_id == 42888) %>%
-  select(observation_id, common_name, phenophase_description, 
-         phenophase_status, intensity_value) %>%
-  arrange(phenophase_description)
-# In this case, reports of flower heads with different status & reports of 
-# open flowers & fruit with different intensity values
-#TODO: Figure out if/where we want QA/QC (within observer-individual-date) to happen
-
-
+# Looking at examples where we have a ton of different phenophases observed
 count(filter(obs, n == n_ph), n, n_ph) 
 # Up to 11 phenophases recorded as part of one observation 
 head(filter(obs, n == 11, n_ph == 11))
