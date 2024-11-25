@@ -199,7 +199,7 @@ ia2 <- ia2 %>%
 # category
 for (i in 2:nrow(ia2)) {
   ia2$value[i] <- ifelse(ia2$category_id[i] == ia2$category_id[i - 1] & 
-                         ia2$value[i] < ia2$value[i - 1],
+                         ia2$type[i] != ia2$type[i - 1],
                          ia2$value[i - 1] + 1, ia2$value[i])
 } 
 ia2 <- data.frame(ia2)

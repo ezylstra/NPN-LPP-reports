@@ -15,7 +15,7 @@
 13,"Leaf size",28,"50-74%","","percent",62
 13,"Leaf size",29,"75-94%","","percent",84
 13,"Leaf size",30,"95% or more","","percent",95
-13,"Leaf size",31,"Less than 25%","","percent",96
+13,"Leaf size",31,"Less than 25%","","percent",12
 14,"Colored leaf proportion",25,"Less than 5%","","percent",2
 14,"Colored leaf proportion",26,"5-24%","","percent",14
 14,"Colored leaf proportion",27,"25-49%","","percent",37
@@ -123,7 +123,7 @@
 41,"Leaf size",28,"50-74%","","percent",62
 41,"Leaf size",29,"75-94%","","percent",84
 41,"Leaf size",30,"95% or more","","percent",95
-41,"Leaf size",31,"Less than 25%","","percent",96
+41,"Leaf size",31,"Less than 25%","","percent",12
 42,"Colored leaf percentage",25,"Less than 5%","","percent",2
 42,"Colored leaf percentage",26,"5-24%","","percent",14
 42,"Colored leaf percentage",27,"25-49%","","percent",37
