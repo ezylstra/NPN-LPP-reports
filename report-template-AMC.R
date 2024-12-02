@@ -191,22 +191,68 @@ si <- si %>%
   select(-c(obsnum, dups)) %>%
   arrange(common_name, obsdate, person_id, phenophase_id)
 
-#- Deal with multiple observations by different people ------------------------#
+#- Accounting for multiple observations by different people -------------------#
 # Same plant or animal, same phenophase, same date - different observers
 
 # For plants, multiple observations of the same individual and phenophase on the 
 # same date can tell us about inter-observer variation (assuming phenophase 
 # status and intensity doesn't change).
+
 # For animals, multiple observations of the same species at a site on the same
 # date provides a confounded measure of inter-observer variation and variation 
 # in abundance or activity of the species throughout the day.
 
 # To summarize sampling effort (e.g., when and where observations were made), 
-# probably best to keep all the observations in the dataset. 
+# probably best to keep all the observations in the dataset.
 
 # To analyze phenophase onsets or animal activity/occurrence, probably best
 # to subset or aggregate observations so there is a maximum of one record for 
 # each phenophase associated with a plant/animal at a given site each day.
+
+# Function to calculate sum, but if all values in vector = NA, then return NA
+na_max <- function(x) {
+  y <- ifelse(sum(is.na(x)) == length(x), NA, max(x, na.rm = TRUE))
+  return(y)
+}
+
+#- Creating datasets for animal observations ----------------------------------#
+
+# First a dataset that includes all animal observations (can have multiple 
+# observations of a species at a site in one day [by different observers]). For
+# now will summarize by pheno group (live obs, dead obs, trapped/baited), but 
+# will likely revisit this.
+animal_obs <- si %>%
+  filter(kingdom == "Animalia") %>%
+  group_by(person_id, site_id, common_name, individual_id, obsdate,
+           day_of_year, yr, pheno_group) %>%
+  summarize(status = na_max(phenophase_status),
+            abundance = na_max(abundance_value),
+            intensity = na_max(intensity),
+            .groups = "keep") %>%
+  arrange(common_name, site_id, obsdate, person_id) %>%
+  data.frame()
+
+# Put into wide form, so each row is a summary of an observation 
+# ie, each row is unique combination of species, site, date, and observer
+animal_obs <- animal_obs %>%
+  mutate(pheno_group2 = case_when(
+    pheno_group == "Live observation" ~ "live",
+    pheno_group == "Dead observation" ~ "dead",
+    .default = "trap"
+  )) %>%
+  select(-pheno_group) %>%
+  pivot_wider(names_from = pheno_group2,
+              values_from =c(status, abundance, intensity),
+              names_sort = TRUE) %>%
+  data.frame()
+
+# Then create a dataset that has no more than one observation for each species, 
+# site, date, and phenophase. (Not simplifying to phenogroup yet since I'm not
+# sure what we're doing with this yet). For an animal species, multiple 
+# observations aren't nearly as problematic as they might be for plants because 
+# a status = 0 could easily be a detectionissue. If we assume there are no false 
+# positives, then we can simply use the maximum status value and maximum 
+# intensity or abundance value across observations
 inddatep <- si %>%
   group_by(common_name, individual_id, obsdate, phenophase_id) %>%
   summarize(n_obs = n(),
@@ -214,12 +260,7 @@ inddatep <- si %>%
   data.frame()
 inddatep$obsnum <- 1:nrow(inddatep)
 
-# For an animal species, multiple observations doesn't seem too problematic 
-# because a status = 0 could easily be a detection issue. If we assume there are
-# no false positives, then we can simply use the maximum status value and 
-# maximum intensity or abundance value.
-
-si_sub_animals <- si %>%
+animal_obs2 <- si %>%
   filter(kingdom == "Animalia") %>%
   arrange(common_name, individual_id, obsdate, phenophase_id, 
           desc(phenophase_status), desc(abundance_value), desc(intensity)) %>%
@@ -227,8 +268,10 @@ si_sub_animals <- si %>%
             by = c("individual_id", "obsdate", "phenophase_id")) %>%
   mutate(dups = sequence(rle(as.character(obsnum))$lengths)) %>%
   filter(dups == 1) %>%
-  select(-c(obsnum, dups)) %>%
+  select(-c(obsnum, dups, person_id)) %>%
   arrange(common_name, individual_id, obsdate, phenophase_id)
+
+#- Creating datasets for plant observations -----------------------------------#
 
 # For an individual plant, we have some choices about how to characterize
 # the phenological state and intensity (if recorded) when multiple observations
@@ -328,7 +371,7 @@ si_sub_plants <- si %>%
 pl_pheno_classes <- data.frame(
   class_id = 1:13,
   class_id2 = str_pad(1:13, width = 2, pad = 0),
-  pheno_class = c("inital_leaf", "young_leaf", "leaf", "color_leaf", 
+  pheno_class = c("initial_leaf", "young_leaf", "leaf", "color_leaf", 
                   "fall_leaf", "flower", "open_flower", "pollen", "end_flower",
                   "fruit", "unripe", "ripe", "drop_fruit"),
   pheno_class_g = c(paste0("leaves", 1:3),
@@ -339,6 +382,10 @@ pl_pheno_classes <- data.frame(
                     paste0("fruit", 1:2),
                     paste0("fruit_ripe", 1:2))
 )
+pl_pheno_classes <- pl_pheno_classes %>%
+  mutate(pheno_group = str_sub(pheno_class_g, end = -2)) 
+  # %>%
+  # mutate(phenoG = paste0(pheno_group, "G"))
 
 # Put in wide form and label columns appropriately
 plant_obs <- si_sub_plants %>%
@@ -482,13 +529,16 @@ plant_obs2 <- plant_obs %>%
   filter(dups == 1) %>%
   select(-c(obsnum, observer_rank, dups))
 
-
 # Summary of objects we'll use moving forward:
   # si = dataframe where each row has data associated with unique combination of
     # site, species, individual_id, date, phenophase, and observer. Best for 
     # summarizing effort. May contain multiple observations of an individual and
     # phenophase in a day.
-  # si_sub_animals = dataframe where each row has data for a unique combination 
+  # animal_obs = dataframe where each row has data for a unique combination of 
+    # individual id (site * species), date, and observer. Best for 
+    # summarizing effort (by pheno group). May contain multiple observations of 
+    # a species at a site in a day.
+  # animal_obs2 = dataframe where each row has data for a unique combination 
     # of individual id (site * species), date, and phenophase. Best for
     # summarizing animal activity/detections. No more than one observation of
     # a species and phenophase each day.
@@ -500,7 +550,55 @@ plant_obs2 <- plant_obs %>%
     # site, species, individual_id, and date. Best for summarizing plant
     # phenology. No more than one observation of a plant each day.
 
-#NEXT: aggregate information within pheno group 
+
+
+#- Start creating data overviews / effort summaries ---------------------------#
+
+#- Table: Site summaries ------------------------------------------------------#
+
+# Site name, no. plant species, no. individual plants, no. animal species, 
+# no. observers, year range, no. observations (plant/animal-date-observer)
+  # Minimum number of observations to be included?
+
+
+
+
+
+# Also no. observations, site x year table?
+
+
+
+
+
+
+
+
+
+
+#- Aggregate status information within pheno group? ---------------------------#
+
+# Aggregate status information within pheno group (doesn't make sense to 
+# aggregate intenstiy values, since they may not always be the same type)
+  
+  # Function to calculate sum, but if all values in vector = NA, then return NA
+  na_max <- function(x) {
+    y <- ifelse(sum(is.na(x)) == length(x), NA, max(x, na.rm = TRUE))
+    return(y)
+  }
+
+groups <- unique(pl_pheno_classes$pheno_group)
+for (i in groups) {
+  classes <- pl_pheno_classes$pheno_class[pl_pheno_classes$pheno_group == i]
+  sclasses <- paste0("status_", classes)
+  if (length(sclasses) == 1) {
+    plant_obs2[,paste0("Gstatus_", i)] <- plant_obs2[,sclasses]
+  } else {
+    plant_obs2[,paste0("Gstatus_", i)] <- apply(plant_obs2[,sclasses], 
+                                                1, na_max)
+  }
+}  
+
+
 
 
 
