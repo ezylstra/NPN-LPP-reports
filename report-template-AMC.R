@@ -87,6 +87,16 @@ si <- left_join(si, select(pheno_list, phenophase_id, class_id, pheno_group),
 
 # Append intensity single values (csv created in phenophase-intensities.R)
 intensity_list <- read.csv("intensities.csv")
+# Going to keep intensity values numeric, but want to differentiate between the
+# different types (number, percent, qualitative). Will convert percentages to 
+# proportions and qualitative values to huge numbers.
+intensity_list <- intensity_list %>%
+  rename(value_orig = value) %>%
+  mutate(value = case_when(
+    type == "percent" ~ value_orig / 100,
+    type == "qualitative" ~ value_orig * 100000,
+    .default = value_orig
+  ))
 intensity_list <- intensity_list %>%
   select(category_id, value_name, type, value) %>%
   rename(intensity_category_id = category_id, 
@@ -287,24 +297,25 @@ si_sub_plants <- si %>%
   # A little more data exploration... 
   # Is there just one intensity_category_id for each plant phenophase?
   
-  int_cat_sp <- pl %>%
+  int_cat_sp <- si_sub_plants %>%
     group_by(common_name, phenophase_id, phenophase_description) %>%
     summarize(int_cats = length(unique(intensity_category_id)),
               .groups = "keep") %>%
     data.frame()
   # yellow birch, 483 = Leaves, 3 int cats
-  count(filter(pl, common_name == "yellow birch", phenophase_id == "483"),
+  count(filter(si_sub_plants, common_name == "yellow birch", phenophase_id == "483"),
         intensity_category_id) # 40, 73, or NA
   # No, but I think that's because the counts include intensity categories of NA
   # and because the intensity category may have shifted over time:
-  count(filter(pl, common_name == "yellow birch", phenophase_id == "483"),
+  count(filter(si_sub_plants, common_name == "yellow birch", phenophase_id == "483"),
         intensity_category_id, yr) # 40 used in 2014-2015; 73 used in 2016-2023
-  test <- pl %>%
+  test <- si_sub_plants %>%
     group_by(individual_id, phenophase_id, yr) %>%
     summarize(int_cat = length(unique(intensity_category_id[!is.na(intensity_category_id)])),
               .groups = "keep") %>%
     data.frame()
-  count(test, int_cat) # In a single year, only one intensity category (if any) for that plant
+  count(test, int_cat) 
+  # In a single year, only one intensity category (if any) for that plant, phenophase
 
 # All this means that we put data in wide form, with 2-3 columns for each 
 # plant phenophase: status, intensity (& intensity type?)
@@ -334,16 +345,14 @@ plant_obs <- si_sub_plants %>%
   left_join(select(pl_pheno_classes, class_id, class_id2), 
             by = "class_id") %>%
   select(-c(phenophase_id, phenophase_description, pheno_group, intensity_value, 
-            intensity_category_id, abundance_value, class_id)) %>%
-  rename(status = phenophase_status,
-         int_type = intensity_type) %>%
+            intensity_category_id, intensity_type, abundance_value, class_id)) %>%
+  rename(status = phenophase_status) %>%
   pivot_wider(names_from = class_id2,
-              values_from = c(status, int_type, intensity),
+              values_from = c(status, intensity),
               names_sort = TRUE) %>%
   data.frame()
 # Add in columns for all pheno classes that aren't already in there
 all_cols <- c(paste0("status_", pl_pheno_classes$class_id2),
-              paste0("int_type_", pl_pheno_classes$class_id2),
               paste0("intensity_", pl_pheno_classes$class_id2))
 missing_cols <- setdiff(all_cols, colnames(plant_obs))
 if (length(missing_cols) > 0) {
@@ -351,7 +360,6 @@ if (length(missing_cols) > 0) {
   colnames(add) <- missing_cols
   add <- add %>%
     mutate(across(starts_with("status"), as.numeric)) %>%
-    mutate(across(starts_with("int_type"), as.character)) %>%
     mutate(across(starts_with("intensity"), as.integer))
   plant_obs <- cbind.data.frame(plant_obs, add)
 }
@@ -373,8 +381,8 @@ for (i in 1:nrow(pl_pheno_classes)) {
   # If unripe fruit = 1, fruit = 1
   # If ripe fruit = 1, fruit = 1
   # For now, leaving instances where more specific category = 1 and general
-  # category(leaves, flower, fruit) = NA
-  #TODO: probably want to provide this info to group and ask about NAs
+  # category (leaves, flower, fruit) = NA
+  #TODO: probably want to provide this info to others and ask about NAs
 
 # First, see how often these issues come up?
 count(plant_obs, status_young_leaf, status_leaf) 
@@ -402,26 +410,97 @@ plant_obs <- plant_obs %>%
     .default = status_fruit
   ))
 
-# Start summarizing data for each observer-plant-date combination
-system.time(plant_obs2 <- plant_obs %>%
-  rowwise() %>%
-  mutate(n_status = sum(!is.na(across(starts_with("status"))))))
-# works but is slow
-system.time(plant_obs2 <- plant_obs %>%
-  rowwise() %>%
-  mutate(n_status = sum(!is.na(pick(starts_with("status"))))) %>%
-  ungroup() %>%
-  data.frame())
-# much better (though still a few seconds)
+# Summarize data available for each observer-plant-date combination
+plant_obs <- plant_obs %>%
+  mutate(n_status = rowSums(!is.na(pick(starts_with("status"))))) %>%
+  mutate(n_yes = rowSums(pick(starts_with("status")), na.rm =TRUE)) %>%
+  mutate(n_intensities = rowSums(!is.na(pick(starts_with("intensity")))))
+
+# For each plant and year, create an observer rank based on the number of dates
+# each observer monitored the plant (higher rank [lower number] goes to 
+# the most consistent observer)
+  
+  # Find all plant-year combinations where at least once, multiple people made 
+  # observations on the same day
+  mult_obs_date <- plant_obs %>%
+    group_by(individual_id, obsdate, yr) %>%
+    summarize(n_observations = n(), .groups = "keep") %>%
+    data.frame() %>%
+    mutate(obsnum = row_number())
+  mult_obs_yr <- mult_obs_date %>%  
+    group_by(individual_id, yr) %>%
+    summarize(mult_obs = 1 * any(n_observations > 1), .groups = "keep") %>%
+    data.frame() %>%
+    filter(mult_obs == 1)
+  # Rank observers by number of days monitored, breaking ties with number of 
+  # intensities recorded and number of statuses recorded
+  for (i in 1:nrow(mult_obs_yr)) {
+    plant_obs_sub <- plant_obs %>%
+      filter(individual_id == mult_obs_yr$individual_id[i]) %>%
+      filter(yr == mult_obs_yr$yr[i])
+    observer_count <- plant_obs_sub %>%
+      group_by(person_id) %>%
+      summarize(n_obs = n(),
+                n_status = sum(n_status),
+                n_intensities = sum(n_intensities)) %>%
+      data.frame() %>%
+      arrange(desc(n_obs), desc(n_intensities), desc(n_status)) %>%
+      mutate(observer_rank = row_number()) %>%
+      mutate(individual_id = mult_obs_yr$individual_id[i], 
+             yr = mult_obs_yr$yr[i]) 
+    if (i == 1) {
+      observer_rank <- observer_count
+    } else {
+      observer_rank <- rbind(observer_rank, observer_count)
+    }
+  }
+  
+# Attach number of observations and observer rank to dataframe
+plant_obs <- plant_obs %>%
+  left_join(mult_obs_date, by = c("individual_id", "obsdate", "yr")) %>%
+  left_join(select(observer_rank, person_id, individual_id, yr, observer_rank),
+            by = c("person_id", "individual_id", "yr"))   
+# Check that there's always an observer rank if there are multiple 
+# observations of that plant on that date:
+summary(plant_obs$observer_rank[plant_obs$n_observations > 1])
+summary(plant_obs$n_observations[is.na(plant_obs$observer_rank)])
+
+# Finally, remove all but one observation of a plant per day. Selecting based
+# on: 
+# 1) Number of statuses reported
+# 2) Number of "yes" statuses with an intensity value reported
+# 3) Observer rank (preferentially selecting data from the person who observed
+#    the plant more often than others)
+
+plant_obs2 <- plant_obs %>%
+  # Replance NAs in observer rank with 0 for easier sorting
+  mutate(observer_rank = replace_na(observer_rank, 0)) %>%
+  # Sort dataframe by above criteria
+  arrange(obsnum, desc(n_status), desc(n_intensities), observer_rank) %>%
+  # Remove all but one observation and remove unnecessary columns
+  mutate(dups = sequence(rle(as.character(obsnum))$lengths)) %>%
+  filter(dups == 1) %>%
+  select(-c(obsnum, observer_rank, dups))
 
 
-#- PICK UP HERE ---------------------------------------------------------------#
+# Summary of objects we'll use moving forward:
+  # si = dataframe where each row has data associated with unique combination of
+    # site, species, individual_id, date, phenophase, and observer. Best for 
+    # summarizing effort. May contain multiple observations of an individual and
+    # phenophase in a day.
+  # si_sub_animals = dataframe where each row has data for a unique combination 
+    # of individual id (site * species), date, and phenophase. Best for
+    # summarizing animal activity/detections. No more than one observation of
+    # a species and phenophase each day.
+  # plant_obs = dataframe where each row has data for a unique combination of
+    # site, species, individual_id, date, and observer. Best for summarizing 
+    # effort. May contain multiple observations of a plant and phenophase in a 
+    # day.
+  # plant_obs2 = dataframe where each row has data for a unique combination of
+    # site, species, individual_id, and date. Best for summarizing plant
+    # phenology. No more than one observation of a plant each day.
 
-
-
-
-#TODO: After removing multiple observations of the same phenophase, we'll 
-# aggregate information within pheno group 
+#NEXT: aggregate information within pheno group 
 
 
 
