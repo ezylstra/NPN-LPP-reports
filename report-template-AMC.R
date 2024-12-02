@@ -119,6 +119,7 @@ sites <- si %>%
   group_by(site_id, site_name, latitude, longitude, 
            elevation_in_meters, state) %>%
   summarize(n_plant_spp = length(unique(species_id[kingdom == "Plantae"])),
+            n_plants = length(unique(individual_id[kingdom == "Plantae"])),
             n_animal_spp = length(unique(species_id[kingdom == "Animalia"])),
             n_observers = length(unique(person_id)),
             n_yrs = length(unique(yr)),
@@ -550,21 +551,47 @@ plant_obs2 <- plant_obs %>%
     # site, species, individual_id, and date. Best for summarizing plant
     # phenology. No more than one observation of a plant each day.
 
-
-
 #- Start creating data overviews / effort summaries ---------------------------#
 
-#- Table: Site summaries ------------------------------------------------------#
+#- Tables: Site summaries ------------------------------------------------------#
 
 # Site name, no. plant species, no. individual plants, no. animal species, 
 # no. observers, year range, no. observations (plant/animal-date-observer)
-  # Minimum number of observations to be included?
+sitest <- sites %>%
+  select(site_id, site_name, n_plant_spp, n_plants, n_animal_spp, n_observers, 
+         n_yrs, yr_first, yr_last) %>%
+  rename(plant_spp = n_plant_spp,
+         plants = n_plants,
+         animal_spp = n_animal_spp,
+         observers = n_observers,
+         years = n_yrs)
+# Find number of observations of animals
+site_a <- animal_obs %>%
+  group_by(site_id) %>%
+  summarize(n_animal_obs = n()) %>%
+  data.frame()
+# Find number of observations of plants
+site_p <- plant_obs %>%
+  group_by(site_id) %>%
+  summarize(n_plant_obs = n()) %>%
+  data.frame()
+# Combine and clean up
+sitest <- sitest %>%
+  left_join(site_a, by = "site_id") %>%
+  left_join(site_p, by = "site_id") %>%
+  mutate(across(n_animal_obs:n_plant_obs,  ~ replace_na(.x, 0))) %>%
+  mutate(obs_total = n_animal_obs + n_plant_obs) %>%
+  rename(obs_animal = n_animal_obs,
+         obs_plant = n_plant_obs)
+#TODO: Decide whether we want filters for number of years (>= 3?), number
+# of observations (> 100?), or number of species?
+
+# Table with the number of observations per year?
+# Or maybe a figure, with total observations per year, and a few smaller lines 
+# for particular sites or species of interest?
 
 
 
-
-
-# Also no. observations, site x year table?
 
 
 
@@ -579,12 +606,7 @@ plant_obs2 <- plant_obs %>%
 
 # Aggregate status information within pheno group (doesn't make sense to 
 # aggregate intenstiy values, since they may not always be the same type)
-  
-  # Function to calculate sum, but if all values in vector = NA, then return NA
-  na_max <- function(x) {
-    y <- ifelse(sum(is.na(x)) == length(x), NA, max(x, na.rm = TRUE))
-    return(y)
-  }
+
 
 groups <- unique(pl_pheno_classes$pheno_group)
 for (i in groups) {
