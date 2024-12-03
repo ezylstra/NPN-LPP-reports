@@ -553,7 +553,7 @@ plant_obs2 <- plant_obs %>%
 
 #- Start creating data overviews / effort summaries ---------------------------#
 
-#- Tables: Site summaries ------------------------------------------------------#
+#- Table: Site summaries ------------------------------------------------------#
 
 # Site name, no. plant species, no. individual plants, no. animal species, 
 # no. observers, year range, no. observations (plant/animal-date-observer)
@@ -588,9 +588,32 @@ sitest <- sitest %>%
 
 # Table with the number of observations per year?
 # Or maybe a figure, with total observations per year, and a few smaller lines 
-# for particular sites or species of interest?
+# for particular sites (or species) of interest?
 
+#- Table: Yearly summaries ----------------------------------------------------#
 
+# No. of sites, No. of observers, no. plant and animal observations by year
+yearst <- si %>%
+  group_by(yr) %>%
+  summarize(sites = length(unique(site_id)),
+            observers = length(unique(person_id))) %>% 
+  data.frame()
+# Find number of observations of animals
+year_a <- animal_obs %>%
+  group_by(yr) %>%
+  summarize(obs_animal = n()) %>%
+  data.frame()
+# Find number of observations of plants
+year_p <- plant_obs %>%
+  group_by(yr) %>%
+  summarize(obs_plant = n()) %>%
+  data.frame()
+# Combine and clean up
+yearst <- yearst %>%
+  left_join(year_a, by = "yr") %>%
+  left_join(year_p, by = "yr") %>%
+  mutate(across(obs_animal:obs_plant,  ~ replace_na(.x, 0))) %>%
+  mutate(obs_total = obs_animal + obs_plant)
 
 
 
