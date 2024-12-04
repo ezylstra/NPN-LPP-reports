@@ -614,11 +614,17 @@ yearst <- yearst %>%
   left_join(year_p, by = "yr") %>%
   mutate(across(obs_animal:obs_plant,  ~ replace_na(.x, 0))) %>%
   mutate(obs_total = obs_animal + obs_plant)
+#TODO: Decide whether we want filters for number of sites or observations
 
+#- Map(s) ---------------------------------------------------------------------#
 
+# Should be options if there's one site, 1-9 sites, 10 or more sites
 
+# Might also be options we could turn on or off (eg, color gradiation depending
+# on the number of years or observations, inset map if a subset are in very
+# close proximity)
 
-
+# For now, see start in site-maps.R
 
 
 
