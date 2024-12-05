@@ -630,42 +630,9 @@ yearst <- yearst %>%
 
 # First, need to figure out whether we're doing this by phenoclass or group.
 # How much data do we have for each class, by species?
-pclass_summary_yr <- plant_obs2 %>%
-  group_by(common_name, yr) %>%
-  # Calculate number of status obseravtions, number of yeses
-  summarize(n_obs = n(),
-            s_initial_leaf = sum(!is.na(status_initial_leaf)),
-            y_initial_leaf = round(sum(status_initial_leaf == 1, na.rm = TRUE) / s_initial_leaf, 2),
-            s_young_leaf = sum(!is.na(status_young_leaf)),
-            y_young_leaf = round(sum(status_young_leaf == 1, na.rm = TRUE) / s_young_leaf, 2),
-            s_leaf = sum(!is.na(status_leaf)),
-            y_leaf = round(sum(status_leaf == 1, na.rm = TRUE) / s_leaf, 2),
-            s_color_leaf = sum(!is.na(status_color_leaf)),
-            y_color_leaf = round(sum(status_color_leaf == 1, na.rm = TRUE) / s_color_leaf, 2),
-            s_fall_leaf = sum(!is.na(status_fall_leaf)),
-            y_fall_leaf = round(sum(status_fall_leaf == 1, na.rm = TRUE) / s_fall_leaf, 2),
-            s_flower = sum(!is.na(status_flower)),
-            y_flower = round(sum(status_flower == 1, na.rm = TRUE) / s_flower, 2),
-            s_open_flower = sum(!is.na(status_open_flower)),
-            y_open_flower = round(sum(status_open_flower == 1, na.rm = TRUE) / s_open_flower, 2),
-            s_pollen = sum(!is.na(status_pollen)),
-            y_pollen = round(sum(status_pollen == 1, na.rm = TRUE) / s_pollen, 2),
-            s_end_flower = sum(!is.na(status_end_flower)),
-            y_end_flower = round(sum(status_end_flower == 1, na.rm = TRUE) / s_end_flower, 2),
-            s_fruit = sum(!is.na(status_fruit)),
-            y_fruit = round(sum(status_fruit == 1, na.rm = TRUE) / s_fruit, 2),
-            s_unripe = sum(!is.na(status_unripe)),
-            y_unripe = round(sum(status_unripe == 1, na.rm = TRUE) / s_unripe, 2),
-            s_ripe = sum(!is.na(status_ripe)),
-            y_ripe = round(sum(status_ripe == 1, na.rm = TRUE) / s_ripe, 2),
-            s_drop_fruit = sum(!is.na(status_drop_fruit)),
-            y_drop_fruit = round(sum(status_drop_fruit == 1, na.rm = TRUE) / s_drop_fruit, 2),
-            .groups = "keep") %>%
-  data.frame()
-
 pclass_summary <- plant_obs2 %>%
   group_by(common_name) %>%
-  # Calculate number of status obseravtions, number of yeses
+  # Calculate number of status observations, number of yeses
   summarize(n_obs = n(),
             s_initial_leaf = sum(!is.na(status_initial_leaf)),
             y_initial_leaf = round(sum(status_initial_leaf == 1, na.rm = TRUE) / s_initial_leaf, 2),
@@ -699,7 +666,7 @@ pclass_summary <- plant_obs2 %>%
 select(pclass_summary, common_name, n_obs, 
        s_initial_leaf, s_young_leaf, s_leaf,
        y_initial_leaf, y_young_leaf, y_leaf)
-# What about just combining young_leaf and leaf? Since initial_X might be
+# Should we just combine young_leaf and leaf? Since initial_growth may be 
 # vegetation but not leaves, then maybe this isn't great to lump with the others?
 select(pclass_summary, common_name, n_obs, 
        s_color_leaf, s_fall_leaf,
@@ -714,6 +681,10 @@ select(pclass_summary, common_name, n_obs,
        y_fruit, y_unripe, y_ripe, y_drop_fruit)
 # original groups (fruit (fruit + unripe); ripe fruit (ripe + drop) seem fine
 
+# For now, will use original 7 pheno groups for plants...
+
+#TODO: put class id back in column titles so they're easier to put into groups.
+# Easiest to add column names to pl_pheno_classes?
 
 
 
