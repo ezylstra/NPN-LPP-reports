@@ -83,7 +83,6 @@ si <- si %>% distinct(across(-observation_id))
 pheno_list <- read.csv("phenophases.csv")
 si <- left_join(si, select(pheno_list, phenophase_id, class_id, pheno_group),
                 by = "phenophase_id")
-#TODO: Decide whether we need to keep class_id in there.
 
 # Append intensity single values (csv created in phenophase-intensities.R)
 intensity_list <- read.csv("intensities.csv")
@@ -288,17 +287,17 @@ si_sub_plants <- si %>%
 
   # A little data exploration...
   # For each species, there is only 1 phenophase per pheno class.
-    si_sub_plants %>%
-      group_by(common_name, class_id) %>%
-      summarize(n_phenophases = length(unique(phenophase_id)),
-                .groups = "keep") %>%
-      data.frame()
+    # si_sub_plants %>%
+    #   group_by(common_name, class_id) %>%
+    #   summarize(n_phenophases = length(unique(phenophase_id)),
+    #             .groups = "keep") %>%
+    #   data.frame()
   # For each species, may have more than 1-3 phenophases per pheno group
-    si_sub_plants %>%
-      group_by(common_name, pheno_group) %>%
-      summarize(n_phenophases = length(unique(phenophase_id)),
-                .groups = "keep") %>%
-      data.frame()
+    # si_sub_plants %>%
+    #   group_by(common_name, pheno_group) %>%
+    #   summarize(n_phenophases = length(unique(phenophase_id)),
+    #             .groups = "keep") %>%
+    #   data.frame()
   
   # For each species, summarize number of phenophases, pheno classes, pheno 
   # groups, and observations per pheno class
@@ -340,55 +339,71 @@ si_sub_plants <- si %>%
 
   # A little more data exploration... 
   # Is there just one intensity_category_id for each plant phenophase?
-  
-  int_cat_sp <- si_sub_plants %>%
-    group_by(common_name, phenophase_id, phenophase_description) %>%
-    summarize(int_cats = length(unique(intensity_category_id)),
-              .groups = "keep") %>%
-    data.frame()
-  # yellow birch, 483 = Leaves, 3 int cats
-  count(filter(si_sub_plants, common_name == "yellow birch", phenophase_id == "483"),
-        intensity_category_id) # 40, 73, or NA
+    # int_cat_sp <- si_sub_plants %>%
+    #   group_by(common_name, phenophase_id, phenophase_description) %>%
+    #   summarize(int_cats = length(unique(intensity_category_id)),
+    #             .groups = "keep") %>%
+    #   data.frame()
+    # count(filter(si_sub_plants, common_name == "yellow birch", phenophase_id == "483"),
+    #       intensity_category_id) # 40, 73, or NA
   # No, but I think that's because the counts include intensity categories of NA
   # and because the intensity category may have shifted over time:
-  count(filter(si_sub_plants, common_name == "yellow birch", phenophase_id == "483"),
-        intensity_category_id, yr) # 40 used in 2014-2015; 73 used in 2016-2023
-  test <- si_sub_plants %>%
-    group_by(individual_id, phenophase_id, yr) %>%
-    summarize(int_cat = length(unique(intensity_category_id[!is.na(intensity_category_id)])),
-              .groups = "keep") %>%
-    data.frame()
-  count(test, int_cat) 
+    # count(filter(si_sub_plants, common_name == "yellow birch", phenophase_id == "483"),
+    #       intensity_category_id, yr) # 40 used in 2014-2015; 73 used in 2016-2023
+    # test <- si_sub_plants %>%
+    #   group_by(individual_id, phenophase_id, yr) %>%
+    #   summarize(int_cat = length(unique(intensity_category_id[!is.na(intensity_category_id)])),
+    #             .groups = "keep") %>%
+    #   data.frame()
+    # count(test, int_cat) 
   # In a single year, only one intensity category (if any) for that plant, phenophase
 
-# All this means that we put data in wide form, with 2-3 columns for each 
-# plant phenophase: status, intensity (& intensity type?)
+# All this means that we put data in wide form, with 2 columns for each 
+# plant phenophase: status, intensity
 
 # Putting data in wide form:
 # Can use phenophase class_id instead of phenophase_id because there's a maximum
 # of one phenophase per class for each species.
 
 # Create a table with info/names for each plant phenophase class    
-pl_pheno_classes <- data.frame(
-  class_id = 1:13,
-  class_id2 = str_pad(1:13, width = 2, pad = 0),
-  pheno_class = c("initial_leaf", "young_leaf", "leaf", "color_leaf", 
-                  "fall_leaf", "flower", "open_flower", "pollen", "end_flower",
-                  "fruit", "unripe", "ripe", "drop_fruit"),
-  pheno_class_g = c(paste0("leaves", 1:3),
-                    paste0("leaf_end", 1:2),
-                    paste0("flower", 1),
-                    paste0("flower_open", 1:2),
-                    paste0("flower_end", 1),
-                    paste0("fruit", 1:2),
-                    paste0("fruit_ripe", 1:2))
-)
-pl_pheno_classes <- pl_pheno_classes %>%
-  mutate(pheno_group = str_sub(pheno_class_g, end = -2)) 
-  # %>%
-  # mutate(phenoG = paste0(pheno_group, "G"))
+pheno_list <- pheno_list %>%
+  mutate(class_short = case_when(
+    class_id == 1 ~ "initial_growth",
+    class_id == 2 ~ "young_leaf",    
+    class_id == 3 ~ "leaf",
+    class_id == 4 ~ "color_leaf",
+    class_id == 5 ~ "fall_leaf",
+    class_id == 6 ~ "flower",
+    class_id == 7 ~ "open_flower",
+    class_id == 8 ~ "pollen",
+    class_id == 9 ~ "end_flower",
+    class_id == 10 ~ "fruit",
+    class_id == 11 ~ "unripe_fruit",
+    class_id == 12 ~ "ripe_fruit",
+    class_id == 13 ~ "drop_fruit",
+    .default = NA
+  )) %>%
+  mutate(group_short = case_when(
+    pheno_group == "Dead observation" ~ "dead",
+    pheno_group == "Live observation" ~ "live",
+    pheno_group == "Trapped/baited" ~ "trap",
+    pheno_group == "Leaves" ~ "leaf",
+    pheno_group == "Leaf senescence" ~ "leaf_end",
+    pheno_group == "Flowers" ~ "flower",
+    pheno_group == "Open flowers" ~ "flower_open",
+    pheno_group == "Flower senescence" ~ "flower_end",
+    pheno_group == "Fruits" ~ "fruit",
+    pheno_group == "Ripe fruits" ~ "fruit_ripe"
+  ))
 
-# Put in wide form and label columns appropriately
+pl_pheno_classes <- pheno_list %>%
+  filter(class_id %in% 1:13) %>%
+  select(class_id, class_short, group_short) %>%
+  distinct() %>%
+  arrange(class_id) %>%
+  mutate(class_id2 = str_pad(class_id, width = 2, pad = 0))
+
+# Put in wide form
 plant_obs <- si_sub_plants %>%
   left_join(select(pl_pheno_classes, class_id, class_id2), 
             by = "class_id") %>%
@@ -399,7 +414,7 @@ plant_obs <- si_sub_plants %>%
               values_from = c(status, intensity),
               names_sort = TRUE) %>%
   data.frame()
-# Add in columns for all pheno classes that aren't already in there
+# Add in columns for any pheno classes that aren't already in there
 all_cols <- c(paste0("status_", pl_pheno_classes$class_id2),
               paste0("intensity_", pl_pheno_classes$class_id2))
 missing_cols <- setdiff(all_cols, colnames(plant_obs))
@@ -411,34 +426,41 @@ if (length(missing_cols) > 0) {
     mutate(across(starts_with("intensity"), as.integer))
   plant_obs <- cbind.data.frame(plant_obs, add)
 }
+# Put columns in order
 first_status_col <- which(grepl("status", colnames(plant_obs)))[1]
 plant_obs <- plant_obs %>%
   select(colnames(plant_obs)[1:(first_status_col - 1)], all_of(all_cols))
-# Put phenophase class name in column name
-for (i in 1:nrow(pl_pheno_classes)) {
-  colnames(plant_obs) <- str_replace(colnames(plant_obs), 
-                                pl_pheno_classes$class_id2[i], 
-                                pl_pheno_classes$pheno_class[i])
-}
 
 # Resolve any inconsistencies with status
-  # If young leaves = 1, leaves = 1 (ok if young = 1, leaves = NA)
-  # If color leaves = 1, leaves = 1
-  # If open flower = 1, flower = 1
-  # If pollen = 1, flower = 1
-  # If unripe fruit = 1, fruit = 1
-  # If ripe fruit = 1, fruit = 1
-  # For now, leaving instances where more specific category = 1 and general
-  # category (leaves, flower, fruit) = NA
-  #TODO: probably want to provide this info to others and ask about NAs
+# If young leaves = 1, leaves = 1 (ok if young = 1, leaves = NA)
+# If color leaves = 1, leaves = 1
+# If open flower = 1, flower = 1
+# If pollen = 1, flower = 1
+# If unripe fruit = 1, fruit = 1
+# If ripe fruit = 1, fruit = 1
+# For now, leaving instances where more specific category = 1 and general
+# category (leaves, flower, fruit) = NA
+#TODO: probably want to provide this info to others and ask about NAs
+
+# To make this a little easier to follow, will temporarily rename columns
+pl_pheno_classes <- pl_pheno_classes %>%
+  mutate(stat_cols_c = paste0("status_", class_short),
+         int_cols_c = paste0("intensity_", class_short),
+         stat_cols_g = paste0("status_", group_short),
+         int_cols_g = paste0("intensity_", group_short))
+plant_obs <- plant_obs %>%
+  rename_with(~ pl_pheno_classes$stat_cols_c,
+              all_of(paste0("status_", pl_pheno_classes$class_id2))) %>%
+  rename_with(~ pl_pheno_classes$int_cols_c,
+              all_of(paste0("intensity_", pl_pheno_classes$class_id2)))  
 
 # First, see how often these issues come up?
-count(plant_obs, status_young_leaf, status_leaf) 
-count(plant_obs, status_color_leaf, status_leaf) 
-count(plant_obs, status_open_flower, status_flower) 
-count(plant_obs, status_pollen, status_flower) 
-count(plant_obs, status_unripe, status_fruit) 
-count(plant_obs, status_ripe, status_fruit) 
+  # count(plant_obs, status_young_leaf, status_leaf)
+  # count(plant_obs, status_color_leaf, status_leaf)
+  # count(plant_obs, status_open_flower, status_flower)
+  # count(plant_obs, status_pollen, status_flower)
+  # count(plant_obs, status_unripe_fruit, status_fruit)
+  # count(plant_obs, status_ripe_fruit, status_fruit)
 
 # Replace values where needed
 plant_obs <- plant_obs %>%
@@ -453,8 +475,8 @@ plant_obs <- plant_obs %>%
     .default = status_flower
   )) %>%
   mutate(status_fruit = case_when(
-    (status_unripe == 1 & status_fruit == 0) ~ 1,
-    (status_ripe == 1 & status_fruit == 0) ~ 1, 
+    (status_unripe_fruit == 1 & status_fruit == 0) ~ 1,
+    (status_ripe_fruit == 1 & status_fruit == 0) ~ 1, 
     .default = status_fruit
   ))
 
@@ -509,8 +531,10 @@ plant_obs <- plant_obs %>%
   left_join(select(observer_rank, person_id, individual_id, yr, observer_rank),
             by = c("person_id", "individual_id", "yr"))   
 # Check that there's always an observer rank if there are multiple 
-# observations of that plant on that date:
+# observations of that plant on that date (should not be any NA values):
 summary(plant_obs$observer_rank[plant_obs$n_observations > 1])
+# Check that if there's no observer rank, there's only one observation of that
+# plant on that date (should all be 1):
 summary(plant_obs$n_observations[is.na(plant_obs$observer_rank)])
 
 # Finally, remove all but one observation of a plant per day. Selecting based
@@ -626,86 +650,154 @@ yearst <- yearst %>%
 
 # For now, see start in site-maps.R
 
-#- Calculate phenological onset dates for plants ------------------------------#
+#- Aggregate status information within pheno group ----------------------------#
 
-# First, need to figure out whether we're doing this by phenoclass or group.
-# How much data do we have for each class, by species?
-pclass_summary <- plant_obs2 %>%
-  group_by(common_name) %>%
-  # Calculate number of status observations, number of yeses
+# Aggregate status information within pheno group (doesn't make sense to 
+# aggregate intensity values, since they may not always be the same type)
+
+# For now, will use original 7 pheno groups for plants
+#TODO: Talk to others about this choice
+
+# Create new data frame without intensity data and other data summaries
+plg_status <- plant_obs2 %>% 
+  select(-c(contains("intens"), "n_status", "n_yes", "n_observations"))
+
+# Aggregate information across classes within each pheno group
+for (group in unique(pl_pheno_classes$group_short)) {
+  cols <- pl_pheno_classes$stat_cols_c[pl_pheno_classes$group_short == group]
+  plg_status[,paste0("sum_", group)] <- apply(as.matrix(plg_status[,cols]), 
+                                              1, na_max)
+}
+# Remove columns associated with classes and rename columns with status data
+plg_status <- plg_status %>% select(-contains("status_"))
+colnames(plg_status) <- str_replace(colnames(plg_status), "sum", "status")
+
+#- Decide on calendar vs water year -------------------------------------------#
+
+# Identify whether we want to evaluate onset dates within a calendar year
+# or within a water year (1 Oct - 30 Sep)
+water_year <- FALSE
+
+# if we're using water year, create new yr and doy columns
+plg_status <- plg_status %>% rename(doy = day_of_year)
+if (water_year) {
+  plg_status <- plg_status %>%
+    mutate(mon = month(obsdate)) %>%
+    mutate(wateryr = if_else(mon %in% 10:12, yr + 1, yr)) %>%
+    mutate(wateryrday0 = make_date(year = wateryr - 1, month = 9, day = 30)) %>%
+    mutate(doy = as.numeric(obsdate - wateryrday0)) %>%
+    select(-c(mon, wateryrday0, yr)) %>%
+    rename(yr = wateryr)
+}
+
+#- Calculate/extract onset dates ----------------------------------------------#
+
+# For now, just using the first "yes" of the year (or water year). 
+
+# Within each year, filter to include observations only if there is a preceding 
+# "no" within X days
+
+# Identify what the maximum number of days (X) will be
+prior_days <- 14
+
+# Create a unique ID for each plant-year to make various matches easier
+plg_status <- plg_status %>%
+  mutate(plantyr = paste0(individual_id, "_", yr))
+
+# Create a new dataframe summarizing data available for each plant-year
+py <- plg_status %>%
+  group_by(plantyr, individual_id, yr, common_name, site_id) %>%
   summarize(n_obs = n(),
-            s_initial_leaf = sum(!is.na(status_initial_leaf)),
-            y_initial_leaf = round(sum(status_initial_leaf == 1, na.rm = TRUE) / s_initial_leaf, 2),
-            s_young_leaf = sum(!is.na(status_young_leaf)),
-            y_young_leaf = round(sum(status_young_leaf == 1, na.rm = TRUE) / s_young_leaf, 2),
-            s_leaf = sum(!is.na(status_leaf)),
-            y_leaf = round(sum(status_leaf == 1, na.rm = TRUE) / s_leaf, 2),
-            s_color_leaf = sum(!is.na(status_color_leaf)),
-            y_color_leaf = round(sum(status_color_leaf == 1, na.rm = TRUE) / s_color_leaf, 2),
-            s_fall_leaf = sum(!is.na(status_fall_leaf)),
-            y_fall_leaf = round(sum(status_fall_leaf == 1, na.rm = TRUE) / s_fall_leaf, 2),
-            s_flower = sum(!is.na(status_flower)),
-            y_flower = round(sum(status_flower == 1, na.rm = TRUE) / s_flower, 2),
-            s_open_flower = sum(!is.na(status_open_flower)),
-            y_open_flower = round(sum(status_open_flower == 1, na.rm = TRUE) / s_open_flower, 2),
-            s_pollen = sum(!is.na(status_pollen)),
-            y_pollen = round(sum(status_pollen == 1, na.rm = TRUE) / s_pollen, 2),
-            s_end_flower = sum(!is.na(status_end_flower)),
-            y_end_flower = round(sum(status_end_flower == 1, na.rm = TRUE) / s_end_flower, 2),
-            s_fruit = sum(!is.na(status_fruit)),
-            y_fruit = round(sum(status_fruit == 1, na.rm = TRUE) / s_fruit, 2),
-            s_unripe = sum(!is.na(status_unripe)),
-            y_unripe = round(sum(status_unripe == 1, na.rm = TRUE) / s_unripe, 2),
-            s_ripe = sum(!is.na(status_ripe)),
-            y_ripe = round(sum(status_ripe == 1, na.rm = TRUE) / s_ripe, 2),
-            s_drop_fruit = sum(!is.na(status_drop_fruit)),
-            y_drop_fruit = round(sum(status_drop_fruit == 1, na.rm = TRUE) / s_drop_fruit, 2),
+            first_obs = min(doy),
+            last_obs = max(doy),
+            n_status_lf = sum(!is.na(status_leaf)),
+            n_status_lfe = sum(!is.na(status_leaf_end)),
+            n_status_fl = sum(!is.na(status_flower)),
+            n_status_flo = sum(!is.na(status_flower_open)),
+            n_status_fle = sum(!is.na(status_flower_end)),
+            n_status_fr = sum(!is.na(status_fruit)),
+            n_status_frr = sum(!is.na(status_fruit_ripe)),
+            n_lf_yes = sum(!is.na(status_leaf) & status_leaf == 1),
+            n_lfe_yes = sum(!is.na(status_leaf_end) & status_leaf_end == 1),
+            n_fl_yes = sum(!is.na(status_flower) & status_flower == 1),
+            n_flo_yes = sum(!is.na(status_flower_open) & status_flower_open == 1),
+            n_fle_yes = sum(!is.na(status_flower_end) & status_flower_end == 1),
+            n_fr_yes = sum(!is.na(status_fruit) & status_fruit == 1),
+            n_frr_yes = sum(!is.na(status_fruit_ripe) & status_fruit_ripe == 1),
             .groups = "keep") %>%
   data.frame()
 
-select(pclass_summary, common_name, n_obs, 
-       s_initial_leaf, s_young_leaf, s_leaf,
-       y_initial_leaf, y_young_leaf, y_leaf)
-# Should we just combine young_leaf and leaf? Since initial_growth may be 
-# vegetation but not leaves, then maybe this isn't great to lump with the others?
-select(pclass_summary, common_name, n_obs, 
-       s_color_leaf, s_fall_leaf,
-       y_color_leaf, y_fall_leaf)
-# color_leaf, fall_leaf seems fine to lump together
-select(pclass_summary, common_name, n_obs, 
-       s_flower, s_open_flower, s_pollen, s_end_flower,
-       y_flower, y_open_flower, y_pollen, y_end_flower)
-# original groups (flower; open_flower + pollen; end_flower) seem fine
-select(pclass_summary, common_name, n_obs, 
-       s_fruit, s_unripe, s_ripe, s_drop_fruit,
-       y_fruit, y_unripe, y_ripe, y_drop_fruit)
-# original groups (fruit (fruit + unripe); ripe fruit (ripe + drop) seem fine
+# Remove years when plant was observed only once
+py <- py %>%
+  filter(n_obs > 1)
 
-# For now, will use original 7 pheno groups for plants...
+# Add columns for onset info (do for all pheno groups, even if there was
+# never any status information collected?)
+py$lf_firstyes <- NA
+py$lf_days_lastno <- NA
+py$lfe_firstyes <- NA
+py$lfe_days_lastno <- NA
+py$fl_firstyes <- NA
+py$fl_days_lastno <- NA
+py$flo_firstyes <- NA
+py$flo_days_lastno <- NA
+py$fle_firstyes <- NA
+py$fle_days_lastno <- NA
+py$fr_firstyes <- NA
+py$fr_days_lastno <- NA
+py$frr_firstyes <- NA
+py$frr_days_lastno <- NA
 
-#TODO: put class id back in column titles so they're easier to put into groups.
-# Easiest to add column names to pl_pheno_classes?
+# Loop through each plant-year (note that this can take a few minutes)
+pl_pheno_classes <- pl_pheno_classes %>%
+  mutate(group_code = case_when(
+    group_short == "leaf" ~ "lf",
+    group_short == "leaf_end" ~ "lfe",
+    group_short == "flower" ~ "fl",
+    group_short == "flower_open" ~ "flo",
+    group_short == "flower_end" ~ "fle",
+    group_short == "fruit" ~ "fr",
+    group_short == "fruit_ripe" ~ "frr"
+  ))
+grps <- unique(pl_pheno_classes$group_code)
+grps2 <- unique(pl_pheno_classes$group_short)
 
-
-
-
-#- Aggregate status information within pheno group? ---------------------------#
-
-# Aggregate status information within pheno group (doesn't make sense to 
-# aggregate intenstiy values, since they may not always be the same type)
-
-
-groups <- unique(pl_pheno_classes$pheno_group)
-for (i in groups) {
-  classes <- pl_pheno_classes$pheno_class[pl_pheno_classes$pheno_group == i]
-  sclasses <- paste0("status_", classes)
-  if (length(sclasses) == 1) {
-    plant_obs2[,paste0("Gstatus_", i)] <- plant_obs2[,sclasses]
-  } else {
-    plant_obs2[,paste0("Gstatus_", i)] <- apply(plant_obs2[,sclasses], 
-                                                1, na_max)
+# Loop through plant-years
+for (i in 1:nrow(py)) {
+  
+  # Extract data for plant-year 
+  tmp1 <- plg_status[plg_status$plantyr == py$plantyr[i],]
+  
+  # Loop through pheno groups
+  for (j in 1:length(grps)) {
+    if (py[i, paste0("n_", grps[j], "_yes")] == 0) {next}
+    
+    # Extract only those dates when pheno group status recorded
+    stat_col <- paste0("status_", grps2[j])
+    tmp2 <- tmp1[!is.na(tmp1[,stat_col]),]
+    
+    # Identify rows of tmp2 with first "yes" and first "no"
+    first_yes_ind <- first(which(tmp2[,stat_col] == 1))
+    first_no_ind <- first(which(tmp2[,stat_col] == 0))
+    # Extract onset date (first doy with yes)
+    py[i, paste0(grps[j], "_firstyes")] <- tmp2$doy[first_yes_ind]
+    # Calculate number of days since last no. If there isn't a prior no, then
+    # days_lastno = NA
+    if (first_yes_ind > first_no_ind & !is.na(first_no_ind)) {
+      py[i, paste0(grps[j], "_days_lastno")] <- 
+        py[i, paste0(grps[j], "_firstyes")] - tmp2$doy[first_yes_ind - 1]
+    } else {
+      py[i, paste0(grps[j], "_days_lastno")] <- NA
+    }
   }
-}  
+}
+# Could look at ranges of first yes doy to see whether we're running up against
+# boundaries and should reconsider using calendar year or water year
+
+#- Summarize availability of onset data ---------------------------------------#
+
+
+
 
 
 
