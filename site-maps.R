@@ -26,7 +26,8 @@ map <- ggmap::get_stadiamap(bbox = bb,
 # load(file = "xxx.RData")
 
 sites_map <- ggmap(map) +
-  geom_point(data = coords2, color = "blue", alpha = 0.3, size = 2.5) +
+  geom_point(data = sites, aes(x = longitude, y = latitude),
+             color = "blue", alpha = 0.3, size = 2.5) +
   theme_void() # gets rid of axes completely
 
 # If we want to save map object without any surrounding white space by 
