@@ -250,8 +250,8 @@ animal_obs <- animal_obs %>%
 # site, date, and phenophase. (Not simplifying to phenogroup yet since I'm not
 # sure what we're doing with this yet). For an animal species, multiple 
 # observations aren't nearly as problematic as they might be for plants because 
-# a status = 0 could easily be a detectionissue. If we assume there are no false 
-# positives, then we can simply use the maximum status value and maximum 
+# a status = 0 could easily be a detection issue. If we assume there are no 
+# false positives, then we can simply use the maximum status value and maximum 
 # intensity or abundance value across observations
 inddatep <- si %>%
   group_by(common_name, individual_id, obsdate, phenophase_id) %>%
@@ -400,6 +400,15 @@ pl_pheno_classes <- pheno_list %>%
   filter(class_id %in% 1:13) %>%
   select(class_id, class_short, group_short) %>%
   distinct() %>%
+  mutate(group_code = case_when(
+    group_short == "leaf" ~ "lf",
+    group_short == "leaf_end" ~ "lfe",
+    group_short == "flower" ~ "fl",
+    group_short == "flower_open" ~ "flo",
+    group_short == "flower_end" ~ "fle",
+    group_short == "fruit" ~ "fr",
+    group_short == "fruit_ripe" ~ "frr"
+  )) %>%
   arrange(class_id) %>%
   mutate(class_id2 = str_pad(class_id, width = 2, pad = 0))
 
@@ -431,7 +440,7 @@ first_status_col <- which(grepl("status", colnames(plant_obs)))[1]
 plant_obs <- plant_obs %>%
   select(colnames(plant_obs)[1:(first_status_col - 1)], all_of(all_cols))
 
-# Resolve any inconsistencies with status
+# Resolve any inconsistencies with statuses of phenophase classes
 # If young leaves = 1, leaves = 1 (ok if young = 1, leaves = NA)
 # If color leaves = 1, leaves = 1
 # If open flower = 1, flower = 1
@@ -446,8 +455,8 @@ plant_obs <- plant_obs %>%
 pl_pheno_classes <- pl_pheno_classes %>%
   mutate(stat_cols_c = paste0("status_", class_short),
          int_cols_c = paste0("intensity_", class_short),
-         stat_cols_g = paste0("status_", group_short),
-         int_cols_g = paste0("intensity_", group_short))
+         stat_cols_g = paste0("status_", group_code),
+         int_cols_g = paste0("intensity_", group_code))
 plant_obs <- plant_obs %>%
   rename_with(~ pl_pheno_classes$stat_cols_c,
               all_of(paste0("status_", pl_pheno_classes$class_id2))) %>%
@@ -663,8 +672,8 @@ plg_status <- plant_obs2 %>%
   select(-c(contains("intens"), "n_status", "n_yes", "n_observations"))
 
 # Aggregate information across classes within each pheno group
-for (group in unique(pl_pheno_classes$group_short)) {
-  cols <- pl_pheno_classes$stat_cols_c[pl_pheno_classes$group_short == group]
+for (group in unique(pl_pheno_classes$group_code)) {
+  cols <- pl_pheno_classes$stat_cols_c[pl_pheno_classes$group_code == group]
   plg_status[,paste0("sum_", group)] <- apply(as.matrix(plg_status[,cols]), 
                                               1, na_max)
 }
@@ -694,12 +703,6 @@ if (water_year) {
 
 # For now, just using the first "yes" of the year (or water year). 
 
-# Within each year, filter to include observations only if there is a preceding 
-# "no" within X days
-
-# Identify what the maximum number of days (X) will be
-prior_days <- 14
-
 # Create a unique ID for each plant-year to make various matches easier
 plg_status <- plg_status %>%
   mutate(plantyr = paste0(individual_id, "_", yr))
@@ -710,20 +713,20 @@ py <- plg_status %>%
   summarize(n_obs = n(),
             first_obs = min(doy),
             last_obs = max(doy),
-            n_status_lf = sum(!is.na(status_leaf)),
-            n_status_lfe = sum(!is.na(status_leaf_end)),
-            n_status_fl = sum(!is.na(status_flower)),
-            n_status_flo = sum(!is.na(status_flower_open)),
-            n_status_fle = sum(!is.na(status_flower_end)),
-            n_status_fr = sum(!is.na(status_fruit)),
-            n_status_frr = sum(!is.na(status_fruit_ripe)),
-            n_lf_yes = sum(!is.na(status_leaf) & status_leaf == 1),
-            n_lfe_yes = sum(!is.na(status_leaf_end) & status_leaf_end == 1),
-            n_fl_yes = sum(!is.na(status_flower) & status_flower == 1),
-            n_flo_yes = sum(!is.na(status_flower_open) & status_flower_open == 1),
-            n_fle_yes = sum(!is.na(status_flower_end) & status_flower_end == 1),
-            n_fr_yes = sum(!is.na(status_fruit) & status_fruit == 1),
-            n_frr_yes = sum(!is.na(status_fruit_ripe) & status_fruit_ripe == 1),
+            n_status_lf = sum(!is.na(status_lf)),
+            n_status_lfe = sum(!is.na(status_lfe)),
+            n_status_fl = sum(!is.na(status_fl)),
+            n_status_flo = sum(!is.na(status_flo)),
+            n_status_fle = sum(!is.na(status_fle)),
+            n_status_fr = sum(!is.na(status_fr)),
+            n_status_frr = sum(!is.na(status_frr)),
+            n_lf_yes = sum(!is.na(status_lf) & status_lf == 1),
+            n_lfe_yes = sum(!is.na(status_lfe) & status_lfe == 1),
+            n_fl_yes = sum(!is.na(status_fl) & status_fl == 1),
+            n_flo_yes = sum(!is.na(status_flo) & status_flo == 1),
+            n_fle_yes = sum(!is.na(status_fle) & status_fle == 1),
+            n_fr_yes = sum(!is.na(status_fr) & status_fr == 1),
+            n_frr_yes = sum(!is.na(status_frr) & status_frr == 1),
             .groups = "keep") %>%
   data.frame()
 
@@ -731,36 +734,29 @@ py <- plg_status %>%
 py <- py %>%
   filter(n_obs > 1)
 
-# Add columns for onset info (do for all pheno groups, even if there was
-# never any status information collected?)
+# Add columns for onset info (for all pheno groups, even if there was never any
+# status information collected?)
+# *_firstyes = DOY with first "yes" response
+# *-lastno = number of days between prior "no" response and first "yes" response 
+# (will be NA if no prior "no")
 py$lf_firstyes <- NA
-py$lf_days_lastno <- NA
+py$lf_lastno <- NA
 py$lfe_firstyes <- NA
-py$lfe_days_lastno <- NA
+py$lfe_lastno <- NA
 py$fl_firstyes <- NA
-py$fl_days_lastno <- NA
+py$fl_lastno <- NA
 py$flo_firstyes <- NA
-py$flo_days_lastno <- NA
+py$flo_lastno <- NA
 py$fle_firstyes <- NA
-py$fle_days_lastno <- NA
+py$fle_lastno <- NA
 py$fr_firstyes <- NA
-py$fr_days_lastno <- NA
+py$fr_lastno <- NA
 py$frr_firstyes <- NA
-py$frr_days_lastno <- NA
+py$frr_lastno <- NA
 
 # Loop through each plant-year (note that this can take a few minutes)
-pl_pheno_classes <- pl_pheno_classes %>%
-  mutate(group_code = case_when(
-    group_short == "leaf" ~ "lf",
-    group_short == "leaf_end" ~ "lfe",
-    group_short == "flower" ~ "fl",
-    group_short == "flower_open" ~ "flo",
-    group_short == "flower_end" ~ "fle",
-    group_short == "fruit" ~ "fr",
-    group_short == "fruit_ripe" ~ "frr"
-  ))
 grps <- unique(pl_pheno_classes$group_code)
-grps2 <- unique(pl_pheno_classes$group_short)
+grpsc <- unique(pl_pheno_classes$stat_cols_g)
 
 # Loop through plant-years
 for (i in 1:nrow(py)) {
@@ -773,88 +769,150 @@ for (i in 1:nrow(py)) {
     if (py[i, paste0("n_", grps[j], "_yes")] == 0) {next}
     
     # Extract only those dates when pheno group status recorded
-    stat_col <- paste0("status_", grps2[j])
-    tmp2 <- tmp1[!is.na(tmp1[,stat_col]),]
+    tmp2 <- tmp1[!is.na(tmp1[,grpsc[j]]),]
     
     # Identify rows of tmp2 with first "yes" and first "no"
-    first_yes_ind <- first(which(tmp2[,stat_col] == 1))
-    first_no_ind <- first(which(tmp2[,stat_col] == 0))
+    first_yes_ind <- first(which(tmp2[,grpsc[j]] == 1))
+    first_no_ind <- first(which(tmp2[,grpsc[j]] == 0))
     # Extract onset date (first doy with yes)
     py[i, paste0(grps[j], "_firstyes")] <- tmp2$doy[first_yes_ind]
     # Calculate number of days since last no. If there isn't a prior no, then
     # days_lastno = NA
     if (first_yes_ind > first_no_ind & !is.na(first_no_ind)) {
-      py[i, paste0(grps[j], "_days_lastno")] <- 
+      py[i, paste0(grps[j], "_lastno")] <- 
         py[i, paste0(grps[j], "_firstyes")] - tmp2$doy[first_yes_ind - 1]
     } else {
-      py[i, paste0(grps[j], "_days_lastno")] <- NA
+      py[i, paste0(grps[j], "_lastno")] <- NA
     }
   }
 }
 # Could look at ranges of first yes doy to see whether we're running up against
 # boundaries and should reconsider using calendar year or water year
 
-#- Summarize availability of onset data ---------------------------------------#
+#- Summarize/visualize onset data ---------------------------------------------#
 
+# Within each year, filter to include observations only if there is a preceding 
+# "no" within X days
+# Identify what the cutoff (X) will be:
+prior_days <- 14
 
-
-
-
-
-
-
-#- OLD STUFF ------------------------------------------------------------------#
-
-#- Quick overview of data -----------------------------------------------------#
-# Data dimensions
-dim(si) # 528,810
-count(si, site_name); sort(count(si, site_name)$n) # 105 sites (5 with < 50 records)
-count(si, yr) # 2012-2023, but only 7 and 149 records in 2012, 2013 
-count(filter(si, kingdom == "Plantae"), common_name)   # 21 plant spp ('ohi'a lehua with 28, rest with > 1900)
-count(filter(si, kingdom == "Animalia"), common_name)  # 7 animal spp (but monarch only 1 record)
-
-# How many phenophases recorded across, within species?
-count(si, phenophase_description) # 41 phenophases
-count(si, pheno_group)            # 9 phenophase "groups"
-spp_ph <- si %>%
-  group_by(kingdom, common_name) %>%
-  summarize(n_phenophases = length(unique(phenophase_description)),
-            n_phenogroups = length(unique(pheno_group)),
-            .groups = "keep") %>%
+# Easiest to filter the data if we put in long form first
+onsets <- py %>%
+  select(-c(n_obs, first_obs, last_obs, 
+            contains("n_status"), contains("_yes"))) 
+onsets <- onsets %>%
+  pivot_longer(cols = c(ends_with("firstyes"),ends_with("lastno")),
+               names_to = c("phenogroup", ".value"),
+               names_sep = "_") %>%
   data.frame()
-spp_ph 
-# For animals: 7-13 phenophases, 1-3 phenogroups per species (excl monarchs)
-# For plants: 6-11 phenophases, 5-6 phenogroups per species
+onsets <- onsets %>%
+  filter(!is.na(firstyes)) %>%
+  filter(!is.na(lastno) & lastno <= prior_days)
+# Check
+# sum(onsets$phenogroup == "flo"); sum(py$flo_lastno <= 14, na.rm = TRUE)
 
-# Looking at examples where we have a ton of different phenophases observed
-count(filter(obs, n == n_ph), n, n_ph) 
-# Up to 11 phenophases recorded as part of one observation 
-head(filter(obs, n == 11, n_ph == 11))
-count(filter(obs, n == 11, n_ph == 11), common_name)
-# 1 animal (BTBW); 3 plants (maples, birch)
+# Create a column in onsets df with nice names of phenophase groups, for plots
+onsets <- onsets %>%
+  mutate(group_labels = case_when(
+    phenogroup == "lf" ~ "Leaves",
+    phenogroup == "lfe" ~ "Leaf senescence",
+    phenogroup == "fl" ~ "Flowers",
+    phenogroup == "flo" ~ "Open flowers",
+    phenogroup == "fle" ~ "Flower senescence",
+    phenogroup == "fr" ~ "Fruits",
+    phenogroup == "frr" ~ "Ripe fruits"
+  )) %>%
+  mutate(group_labels = factor(group_labels,
+                               levels = c("Leaf senescence",
+                                          "Ripe fruits",
+                                          "Fruits",
+                                          "Flower senescence",
+                                          "Open flowers",
+                                          "Flowers",
+                                          "Leaves")))
 
-# Looking at birds:
-filter(si, 
-       common_name == "black-throated blue warbler",
-       site_name == "Lonesome Lake Hut (LONE1)",
-       obsdate == "2014-06-14")
-# Live individuals, Feeding, Fruit/seed consumption, Insect consumption,
-# Flower visitation, Calls or song (birds), Singing individuals (birds), 
-# Mating (male on top), Nest building (birds), Dead individuals, 
-# Individuals at a feeding station
+# Assign colors for each phenophase group
+color_vec <- c("#7fbf7b",   # Leaves
+               "#e9a3c9",   # Flowers
+               "#c51b7d",   # Open flowers
+               "#b2beb5",   # Flower senescence
+               "#e7d4e8",   # Fruits
+               "#af8dc3",   # Ripe fruits
+               "#8c510a")   # Leaf senescence
+# Name vector so colors are consistent across figures (in case not all levels 
+# are present in all figures)
+names(color_vec) <- rev(levels(onsets$group_labels))
 
-# Note that if they have calls or singing, may still have 0 for live individuals
-# For these summaries, can probably create a new "phenophase" that is 
-# Activity = 1 if any of the phenophase status (Except for dead) are 1, 0 if not
-# Remove records of dead individuals since they don't provide much info
+# How much data do we have for each phenophase group?
+onsets %>% select(common_name, phenogroup) %>% table
 
-# Looking at trees
-head(filter(obs, n == 11, n_ph == 11, kingdom == "Plantae"))
-filter(si, 
-       common_name == "red maple",
-       site_name == "Ethan Pond Trail (EP2)",
-       obsdate == "2020-06-16")$phenophase_description
-# Breaking leaf buds, Leaves, Increasing leaf size, Colored leaves,
-# Falling leaves, Flowers or flower buds, Open flowers, 
-# Pollen release (flowers), Fruits, Ripe fruits, Recent fruit or seed drop
+# Looking at some open flower data:
+onsets %>% filter(phenogroup == "flo") %>% select(common_name, yr) %>% table
+onsets %>%
+  filter(phenogroup == "flo") %>%
+  group_by(site_id) %>%
+  summarize(n_spp = length(unique(common_name)),
+            n_yrs = length(unique(yr)),
+            n_obs = n()) %>%
+  data.frame() %>%
+  filter(n_yrs > 2 & n_obs >= 10) %>%
+  arrange(desc(n_yrs), desc(n_obs))
 
+# If multiple sites, would like some measures of proximity to know whether 
+# or not we should summarize onset dates by site (or clusters of sites)
+
+# Identify the number of observations for each species-phenogroup combination
+onsets <- onsets %>%
+  group_by(common_name, phenogroup) %>%
+  mutate(n_obs_sppgroup = n()) %>%
+  ungroup() %>%
+  data.frame()
+
+# Plot onset for one phenogroup by species (lumping years, sites together)
+ggplot(data = filter(onsets, phenogroup == "flo", n_obs_sppgroup >= 10),   
+       aes(x = common_name, y = firstyes)) +
+  geom_boxplot(varwidth = TRUE) + 
+  labs(y = "Onset DOY - Open flowers") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+        axis.title.x = element_blank())
+# Note: by using the varwidth argument, width of boxplots are proportional
+# to the square root of the number of observations
+
+# Plot species, phenophase group combos with a minimum number of observations
+min_obs <- 10
+onsets_sub <- onsets %>%
+  filter(n_obs_sppgroup >= min_obs)
+spp <- sort(unique(onsets_sub$common_name))
+
+# Plot onset dates for each species, 4 at a time
+n_plots <- ceiling(length(spp) / 4)
+for (i in 1:n_plots) {
+  spps <- spp[(i * 4 - 3):(i * 4)]
+  assign(paste0("onsets_p", i),
+         ggplot(data = filter(onsets_sub, common_name %in% spps),
+                aes(x = group_labels, y = firstyes, fill = group_labels)) +
+           geom_boxplot(varwidth = TRUE) +
+           ylim(min(onsets_sub$firstyes), max(onsets_sub$firstyes)) +
+           facet_wrap(~ common_name, ncol = 1) +
+           scale_fill_manual(values = color_vec) +
+           labs(x = "", y = "Onset day of year") +
+           coord_flip() +
+           theme(legend.position = "none"))
+}
+for (i in 1:n_plots) {
+  print(get(paste0("onsets_p",i)))
+}
+
+# Might need to separate by site/region if they are not in close proximity. Use
+# climate data to do this?
+
+# Would be good to get an understanding of less "seasonal" species/regions for 
+# which we're less intleerested in initial onset, and more interested in when 
+# phenophases occur since that could happen over long period or multiple times
+# a year. 
+
+#NEXT (and related to point above): Do we want to also create visualizations for 
+# weekly proportions of observations in a particular phenoclass/group? 
+# (using GAMs or something else?)
+
+#NEXT: Download and start summarizing climate data
