@@ -10,6 +10,8 @@ require(lubridate)
 require(stringr)
 require(ggplot2)
 require(terra)
+require(geosphere) # for optional site clustering
+require(fpc) # for optional site clustering
 
 rm(list = ls())
 
@@ -58,6 +60,8 @@ if (!file.exists(si_csv_name)) {
   )
   #TODO: figure out whether it's ever worth including climate data
   #TODO: figure out where we get info about search methods, time for animals
+  # Was going to download observation_time too, but it looks like it wasn't
+  # reported frequently.
   
   # Remove some fields that we don't need (to make file smaller)
   si <- si %>%
@@ -163,7 +167,7 @@ si <- si %>%
 #- Deal with multiple observations by the same person -------------------------#
 # Same plant or animal (same site), same phenophase, same date - same observer
 
-#TODO: Figure out if/where we want QA/QC (within indiv-date-observer) to happen
+#TODO: Figure out if/where we want QA/QC (within plant/animal-date-observer) to happen
 
 # For now, will keep record with more advanced phenophase or higher intensity or
 # abundance value. Will do this by sorting observations and keeping only the 
@@ -660,8 +664,63 @@ yearst <- yearst %>%
 
 # For now, see start in site-maps.R
 
-#- Download climate data ------------------------------------------------------#
+#- Download and process climate data ------------------------------------------#
 
+# Download in download-daymet.R
+
+# Load climate data
+daymet_csv <- paste0("climate-data/daymet-", lpp_short,  
+                     "-thru", max(all_yrs), ".csv")
+daymet_zip <- str_replace(daymet_csv, ".csv", ".zip")
+unzip(daymet_zip)
+clim_full <- read.csv(daymet_csv)
+file.remove(daymet_csv)
+
+# Summarize data for each season (as defined previously by NPN)
+  # Spring = Mar-May
+  # Summer = Jun-Aug
+  # Fall = Sep-Nov
+  # Winter = Dec-Feb (assigned to year for Jan-Feb)
+
+# Just summarize for temperature, precipitation
+clims <- clim_full %>%
+  select(-c(daylength_s, rad_Wm2, vp_Pa, swe_kgm2))
+
+# Assign "seasonyr" (so Dec is associated with Jan, Feb in next calendar year)
+clims <- clims %>%
+  mutate(date = ymd(date)) %>%
+  mutate(seasonyr = if_else(mon == 12, year + 1, year))
+
+# Remove winter seasons where we don't have data from all months and add a 
+# season label
+clims <- clims %>%
+  # Remove data from Jan-Feb in first year with climate data
+  filter(!(seasonyr == min(seasonyr) & mon %in% 1:2)) %>%
+  # Remove data from Dec in last year with climate data
+  filter(seasonyr != max(seasonyr)) %>%
+  # Season labels
+  mutate(season = case_when(
+    mon %in% 3:5 ~ "spring",
+    mon %in% 6:8 ~ "summer",
+    mon %in% 9:11 ~ "fall",
+    .default = "winter"
+  )) %>%
+  mutate(season = factor(season, 
+                         levels = c("winter", "spring", "summer", "fall")))
+
+# Calculate mean daily temperatures
+clims <- clims %>%
+  mutate(tmean_c = round((tmax_c + tmin_c) / 2, 2))
+
+# Summarize data by season (accumulated precip, mean tmin, tmean, tmax)
+clims <- clims %>%
+  group_by(site, seasonyr, season) %>%
+  summarize(prcp = sum(prcp_mm),
+            tmin = mean(tmin_c),
+            tmean = mean(tmean_c),
+            tmax = mean(tmax_c),
+            .groups = "keep") %>%
+  data.frame()
 
 #- Explore site locations -----------------------------------------------------#
 
@@ -672,23 +731,45 @@ yearst <- yearst %>%
 # Could do this by evaluating the distances between locations
 # Could also do this by looking at climate data
 
-# Start by calculating pairwise distances
-sitesll <- sites %>%
-  rename(lon = longitude, lat = latitude) %>%
-  vect(geom = c("lon", "lat"), crs = "epsg:4326")
-dist.matrix <- geosphere::distm(as.matrix(sites[, c("longitude", "latitude")]))
-
-# Cluster analysis (using medoids/k-means)?
-# Alternatively, could use cluster or apcluster packages...
-library(fpc)
-pamk.best <- fpc::pamk(sites[, c("longitude", "latitude")])
-# pamk.best$nc = optimal number of clusters
-# pamk.best$pamobject$clustering = cluster IDs
-Clusters <- factor(pamk.best$pamobject$cluster)
-ggplot() +
-  geom_point(data = sites, aes(x = longitude, y = latitude, 
-                              color = Clusters),
-             alpha = 0.3, size = 2.5)
+# # Start by calculating pairwise distances
+# sitesll <- sites %>%
+#   rename(lon = longitude, lat = latitude) %>%
+#   vect(geom = c("lon", "lat"), crs = "epsg:4326")
+# dist.matrix <- geosphere::distm(as.matrix(sites[, c("longitude", "latitude")]))
+# 
+# # Cluster analysis (using medoids/k-means)?
+# # Alternatively, could use cluster or apcluster packages...
+# pamk.best <- fpc::pamk(sites[, c("longitude", "latitude")])
+# # pamk.best$nc = optimal number of clusters
+# # pamk.best$pamobject$clustering = cluster IDs
+# Clusters <- factor(pamk.best$pamobject$cluster)
+# ggplot() +
+#   geom_point(data = sites, aes(x = longitude, y = latitude, 
+#                               color = Clusters),
+#              alpha = 0.3, size = 2.5)
+# 
+# # Differences in climate among sites
+# clims_c <- clims %>%
+#   group_by(site, season) %>%
+#   summarize(prcp = mean(prcp),
+#             tmin = mean(tmin),
+#             tmean = mean(tmean),
+#             tmax = mean(tmax),
+#             .groups = "keep") %>%
+#   pivot_wider(id_cols = site,
+#               names_from = season,
+#               values_from = c(prcp, tmin, tmean, tmax)) %>%
+#   data.frame() %>%
+#   mutate(across(prcp_winter:tmax_fall, ~scale(.x)[, 1]))
+# pamk.best.c <- fpc::pamk(clims_c[, -1])
+# Clusters.c <- factor(pamk.best.c$pamobject$cluster)
+# ggplot() +
+#   geom_point(data = sites, aes(x = longitude, y = latitude, 
+#                                color = Clusters.c),
+#              alpha = 0.3, size = 2.5)
+# 
+# # Pausing this for now.
+# rm(clims_c)
 
 #- Aggregate status information within pheno group ----------------------------#
 
@@ -899,8 +980,12 @@ onsets <- onsets %>%
   ungroup() %>%
   data.frame()
 
+# Set minimum number of observations per species-phenogroup to summarize onset 
+# dates
+min_obs <- 20
+
 # Plot onset for one phenogroup by species (lumping years, sites together)
-ggplot(data = filter(onsets, phenogroup == "flo", n_obs_sppgroup >= 10),   
+ggplot(data = filter(onsets, phenogroup == "flo", n_obs_sppgroup >= min_obs),   
        aes(x = common_name, y = firstyes)) +
   geom_boxplot(varwidth = TRUE) + 
   labs(y = "Onset DOY - Open flowers") +
@@ -910,7 +995,6 @@ ggplot(data = filter(onsets, phenogroup == "flo", n_obs_sppgroup >= 10),
 # to the square root of the number of observations
 
 # Plot species, phenophase group combos with a minimum number of observations
-min_obs <- 10
 onsets_sub <- onsets %>%
   filter(n_obs_sppgroup >= min_obs)
 spp <- sort(unique(onsets_sub$common_name))
@@ -933,16 +1017,16 @@ for (i in 1:n_plots) {
 for (i in 1:n_plots) {
   print(get(paste0("onsets_p",i)))
 }
+# May want to create species boxplots by region (ie, site "cluster") if sites
+# are spread out geographically.
 
-# Might need to separate by site/region if they are not in close proximity. Use
-# climate data to do this?
+
 
 # Would be good to get an understanding of less "seasonal" species/regions for 
-# which we're less intleerested in initial onset, and more interested in when 
+# which we're less interested in initial onset, and more interested in when 
 # phenophases occur since that could happen over long period or multiple times
 # a year. 
 
 #NEXT (and related to point above): Do we want to also create visualizations for 
 # weekly proportions of observations in a particular phenoclass/group? 
-# (using GAMs or something else?)
-
+# (using GAMs or something else?). Yes
