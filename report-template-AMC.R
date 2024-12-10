@@ -9,6 +9,7 @@ require(dplyr)
 require(lubridate)
 require(stringr)
 require(ggplot2)
+require(terra)
 
 rm(list = ls())
 
@@ -659,6 +660,36 @@ yearst <- yearst %>%
 
 # For now, see start in site-maps.R
 
+#- Download climate data ------------------------------------------------------#
+
+
+#- Explore site locations -----------------------------------------------------#
+
+# Wondering whether any/all sites could be aggregated for summarizing and 
+# analyzing the data. For the moment, won't worry about filtering by the number 
+# of species or observations.
+
+# Could do this by evaluating the distances between locations
+# Could also do this by looking at climate data
+
+# Start by calculating pairwise distances
+sitesll <- sites %>%
+  rename(lon = longitude, lat = latitude) %>%
+  vect(geom = c("lon", "lat"), crs = "epsg:4326")
+dist.matrix <- geosphere::distm(as.matrix(sites[, c("longitude", "latitude")]))
+
+# Cluster analysis (using medoids/k-means)?
+# Alternatively, could use cluster or apcluster packages...
+library(fpc)
+pamk.best <- fpc::pamk(sites[, c("longitude", "latitude")])
+# pamk.best$nc = optimal number of clusters
+# pamk.best$pamobject$clustering = cluster IDs
+Clusters <- factor(pamk.best$pamobject$cluster)
+ggplot() +
+  geom_point(data = sites, aes(x = longitude, y = latitude, 
+                              color = Clusters),
+             alpha = 0.3, size = 2.5)
+
 #- Aggregate status information within pheno group ----------------------------#
 
 # Aggregate status information within pheno group (doesn't make sense to 
@@ -915,4 +946,3 @@ for (i in 1:n_plots) {
 # weekly proportions of observations in a particular phenoclass/group? 
 # (using GAMs or something else?)
 
-#NEXT: Download and start summarizing climate data
