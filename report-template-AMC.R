@@ -10,8 +10,9 @@ require(lubridate)
 require(stringr)
 require(ggplot2)
 require(terra)
-require(geosphere) # for optional site clustering
-require(fpc) # for optional site clustering
+require(lme4)
+# require(geosphere) # for optional site clustering
+# require(fpc) # for optional site clustering
 
 rm(list = ls())
 
@@ -143,6 +144,15 @@ species <- si %>%
             .groups = "keep") %>%
   data.frame()
 
+# Add some information into species dataframe
+ids <- species$species_id
+spp_info <- npn_species() %>%
+  data.frame() %>%
+  filter(species_id %in% ids) %>%
+  select(species_id, species, functional_type, family_common_name, family_name)
+species <- species %>%
+  left_join(spp_info, by = "species_id")
+
 # Remove columns we no longer need
 si <- si %>%
   select(-c(site_name, latitude, longitude, elevation_in_meters, state,
@@ -167,11 +177,9 @@ si <- si %>%
 #- Deal with multiple observations by the same person -------------------------#
 # Same plant or animal (same site), same phenophase, same date - same observer
 
-#TODO: Figure out if/where we want QA/QC (within plant/animal-date-observer) to happen
-
-# For now, will keep record with more advanced phenophase or higher intensity or
-# abundance value. Will do this by sorting observations and keeping only the 
-# first
+# For now, will keep record with more advanced phenophase or higher 
+# intensity/abundance value. Will do this by sorting observations in descending
+# order and keeping only the first
 inddateobsp <- si %>%
   group_by(common_name, individual_id, obsdate, person_id, phenophase_id) %>%
   summarize(n_obs = n(),
@@ -446,15 +454,14 @@ plant_obs <- plant_obs %>%
   select(colnames(plant_obs)[1:(first_status_col - 1)], all_of(all_cols))
 
 # Resolve any inconsistencies with statuses of phenophase classes
-# If young leaves = 1, leaves = 1 (ok if young = 1, leaves = NA)
-# If color leaves = 1, leaves = 1
-# If open flower = 1, flower = 1
-# If pollen = 1, flower = 1
-# If unripe fruit = 1, fruit = 1
-# If ripe fruit = 1, fruit = 1
+  # If young leaves = 1, leaves = 1 (ok if young = 1, leaves = NA)
+  # If color leaves = 1, leaves = 1
+  # If open flower = 1, flower = 1
+  # If pollen = 1, flower = 1
+  # If unripe fruit = 1, fruit = 1
+  # If ripe fruit = 1, fruit = 1
 # For now, leaving instances where more specific category = 1 and general
 # category (leaves, flower, fruit) = NA
-#TODO: probably want to provide this info to others and ask about NAs
 
 # To make this a little easier to follow, will temporarily rename columns
 pl_pheno_classes <- pl_pheno_classes %>%
@@ -771,19 +778,19 @@ clims <- clims %>%
 # # Pausing this for now.
 # rm(clims_c)
 
-#- Aggregate status information within pheno group ----------------------------#
+#- Aggregate status information within phenophase group -----------------------#
 
 # Aggregate status information within pheno group (doesn't make sense to 
 # aggregate intensity values, since they may not always be the same type)
 
-# For now, will use original 7 pheno groups for plants
-#TODO: Talk to others about this choice
+# For now, will use 7 phenophase groups for plants
 
 # Create new data frame without intensity data and other data summaries
 plg_status <- plant_obs2 %>% 
   select(-c(contains("intens"), "n_status", "n_yes", "n_observations"))
 
 # Aggregate information across classes within each pheno group
+# TODO: make this easier by putting htings into long form first?
 for (group in unique(pl_pheno_classes$group_code)) {
   cols <- pl_pheno_classes$stat_cols_c[pl_pheno_classes$group_code == group]
   plg_status[,paste0("sum_", group)] <- apply(as.matrix(plg_status[,cols]), 
@@ -813,7 +820,7 @@ if (water_year) {
 
 #- Calculate/extract onset dates ----------------------------------------------#
 
-# For now, just using the first "yes" of the year (or water year). 
+# For now, just using the first "yes" of the year (or water year).
 
 # Create a unique ID for each plant-year to make various matches easier
 plg_status <- plg_status %>%
@@ -923,6 +930,33 @@ onsets <- onsets %>%
 # Check
 # sum(onsets$phenogroup == "flo"); sum(py$flo_lastno <= 14, na.rm = TRUE)
 
+# Look at sample sizes
+onsets %>% select(common_name, phenogroup) %>% table
+
+# Look at how sample sizes might change if we reduced the window for prior no
+onset_ss <- onsets %>%
+  group_by(common_name, phenogroup) %>%
+  summarize(n_firstyes_14 = n(),
+            n_firstyes_7 = sum(lastno <= 7),
+            .groups = "keep") %>%
+  data.frame() %>%  
+  mutate(prop_7 = round(n_firstyes_7 / n_firstyes_14, 2))
+onset_ss
+# By species
+onset_ss %>%
+  group_by(common_name) %>%
+  summarize(n_obs_14 = sum(n_firstyes_14),
+            mean_prop_7 = round(mean(prop_7), 2)) %>%
+  data.frame() %>%
+  arrange(desc(mean_prop_7))
+# By phenophase group
+onset_ss %>%
+  group_by(phenogroup) %>%
+  summarize(n_obs_14 = sum(n_firstyes_14),
+            mean_prop_7 = round(mean(prop_7), 2)) %>%
+  data.frame() %>%
+  arrange(desc(mean_prop_7))
+
 # Create a column in onsets df with nice names of phenophase groups, for plots
 onsets <- onsets %>%
   mutate(group_labels = case_when(
@@ -955,25 +989,7 @@ color_vec <- c("#7fbf7b",   # Leaves
 # are present in all figures)
 names(color_vec) <- rev(levels(onsets$group_labels))
 
-# How much data do we have for each phenophase group?
-onsets %>% select(common_name, phenogroup) %>% table
-
-# Looking at some open flower data:
-onsets %>% filter(phenogroup == "flo") %>% select(common_name, yr) %>% table
-onsets %>%
-  filter(phenogroup == "flo") %>%
-  group_by(site_id) %>%
-  summarize(n_spp = length(unique(common_name)),
-            n_yrs = length(unique(yr)),
-            n_obs = n()) %>%
-  data.frame() %>%
-  filter(n_yrs > 2 & n_obs >= 10) %>%
-  arrange(desc(n_yrs), desc(n_obs))
-
-# If multiple sites, would like some measures of proximity to know whether 
-# or not we should summarize onset dates by site (or clusters of sites)
-
-# Identify the number of observations for each species-phenogroup combination
+# Add sample sizes for each species-phenogroup combination to onsets
 onsets <- onsets %>%
   group_by(common_name, phenogroup) %>%
   mutate(n_obs_sppgroup = n()) %>%
@@ -982,7 +998,7 @@ onsets <- onsets %>%
 
 # Set minimum number of observations per species-phenogroup to summarize onset 
 # dates
-min_obs <- 20
+min_obs <- 15
 
 # Plot onset for one phenogroup by species (lumping years, sites together)
 ggplot(data = filter(onsets, phenogroup == "flo", n_obs_sppgroup >= min_obs),   
@@ -1020,7 +1036,99 @@ for (i in 1:n_plots) {
 # May want to create species boxplots by region (ie, site "cluster") if sites
 # are spread out geographically.
 
+#- Trends in onset dates ------------------------------------------------------#
 
+# For now, approaching this in a very simple way: 
+  # assuming that the date of the first yes is the onset date
+  # using the first yes of the year that was preceded by a no within X days
+  # just looking at linear trends in a phenophase onset by spp or functional type
+
+# Set the maximum number of days between first yes and prior no
+prior_days_trends <- 14
+onsets <- onsets %>% filter(lastno <= prior_days_trends)
+
+# Identify the first year with >= 15 observations and remove data before then
+yr_obs <- count(onsets, yr) %>% arrange(yr)
+min_yr <- yr_obs$yr[which(yr_obs$n >= 15)][1]
+onsets <- onsets %>% filter(yr >= min_yr)
+
+# Calculate the number of years we have data for each species-phenophase group 
+# combination. (If phenology was likely to differ greatly by sites, then 
+# we would also want to limit analyses to sites that had multiple years of data)
+onsets <- onsets %>%
+  group_by(common_name, phenogroup) %>%
+  mutate(n_yrs_sppgroup = n_distinct(yr)) %>%
+  data.frame()
+
+# Set the minimum number of years a species-phenogroup was observed as well as 
+# the minimum number of observations a species-phenogrooup needs to have in 
+# order to be included in analyses
+min_yrs <- 5
+min_obs_trends <- 15 
+onsets <- onsets %>%
+  filter(n_yrs_sppgroup >= min_yrs) %>%
+  filter(n_obs_sppgroup >= min_obs_trends)
+
+# Add in functional group information
+onsets <- onsets %>%
+  left_join(select(species, common_name, functional_type), by = "common_name")
+onsets %>%
+  group_by(functional_type) %>%
+  summarize(n = n(),
+            n_spp = n_distinct(common_name)) %>%
+  data.frame()
+# Combining all forbs and grasses so there's more than one species per group
+onsets <- onsets %>%
+  mutate(func_group = case_when(
+    functional_type %in% c("Forb", "Graminoid", "Semi-evergreen forb") ~ 
+      "Forb or grass",
+    .default = functional_type
+  ))
+
+# Test case to start...
+onsets %>% select(common_name, phenogroup) %>% table()
+# Evaluating trends in yellow birch
+yebi <- filter(onsets, common_name == "yellow birch")
+count(yebi, yr) # 10 years
+count(yebi, site_id) # 12 sites
+count(yebi, individual_id) #29 sites
+
+yebi <- yebi %>%
+  mutate(individual_id = factor(individual_id),
+         site_id = factor(site_id))
+
+# Note that individual IDs are implicitly nested in sites (each individual_ID
+# is only associated with one site), so we don't need to worry about how
+# we specify the nestedness in the model formula. However, we may likely 
+# run into issues with singular fits...
+
+# Leaves
+ggplot(data = filter(yebi, phenogroup == "lf"), 
+       aes(x = yr, y = firstyes)) +
+  geom_point()
+ggplot(data = filter(yebi, phenogroup == "lf"), 
+       aes(x = yr, y = firstyes, color = site_id)) +
+  geom_point()
+
+yebi_lf_bothr <- lmer(firstyes ~ yr + (1|site_id) + (1|individual_id),
+                      data = filter(yebi, phenogroup == "lf"))
+yebi_lf_indr <- lmer(firstyes ~ yr + (1|individual_id),
+                     data = filter(yebi, phenogroup == "lf"))
+yebi_lf_siter <- lmer(firstyes ~ yr + (1|site_id),
+                      data = filter(yebi, phenogroup == "lf"))
+# All have issues with singularity
+
+yebi_lf_site <- lm(firstyes ~ yr + site_id,
+                   data = filter(yebi, phenogroup == "lf"))
+
+filter(yebi, phenogroup == "lf" & yr == 2014)
+# Weird... 10 sites, 25 trees have onsets in 2014 but all the data look the same
+# 15 onsets at doy 104 with last no 6 days prior
+# 10 onsets at doy 152 with last no 12 days prior
+# Do all volunteers go out on same day?
+
+
+#- Yet to work on... ----------------------------------------------------------#
 
 # Would be good to get an understanding of less "seasonal" species/regions for 
 # which we're less interested in initial onset, and more interested in when 
