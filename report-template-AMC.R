@@ -11,6 +11,7 @@ require(stringr)
 require(ggplot2)
 require(terra)
 require(lme4)
+# require(lmerTest) # Not sure I want this...
 # require(geosphere) # for optional site clustering
 # require(fpc) # for optional site clustering
 
@@ -1047,27 +1048,37 @@ for (i in 1:n_plots) {
 prior_days_trends <- 14
 onsett <- onsets %>% filter(lastno <= prior_days_trends)
 
-# Identify the first year with >= 15 observations and remove data before then
+# Identify the first year with >= 15 observations (across all species and 
+# phenophases, and sites) and remove data before then
 yr_obs <- count(onsett, yr) %>% arrange(yr)
 min_yr <- yr_obs$yr[which(yr_obs$n >= 15)][1]
 onsett <- onsett %>% filter(yr >= min_yr)
 
 # Calculate the number of years we have data for each species-phenophase group 
-# combination. (If phenology was likely to differ greatly by sites, then 
-# we would also want to limit analyses to sites that had multiple years of data)
+# combination, and the number of observations we have for each 
+# species-phenogroup-yr combination. (Note that if phenology likely differed 
+# greatly by sites, then we would also want to evaluate sample sizes for 
+# combinations at each site, but not worrying about that for now).
 onsett <- onsett %>%
   group_by(common_name, phenogroup) %>%
-  mutate(n_yrs_sppgroup = n_distinct(yr)) %>%
+  mutate(nyrs_sppgroup = n_distinct(yr)) %>%
+  ungroup() %>%
+  group_by(common_name, phenogroup, yr) %>%
+  mutate(n_sppgroupyr = n()) %>%
+  ungroup() %>%
   data.frame()
 
-# Set the minimum number of years a species-phenogroup was observed as well as 
-# the minimum number of observations a species-phenogroup needs to have in 
-# order to be included in analyses
+# Set minimum sample sizes (number of years with X observations) for each 
+# species-phenophase group.
 min_yrs <- 5
-min_obs_trends <- 15
+min_obs_per_yr <- 3
 onsett <- onsett %>%
-  filter(n_yrs_sppgroup >= min_yrs) %>%
-  filter(n_obs_sppgroup >= min_obs_trends)
+  group_by(common_name, phenogroup) %>%
+  mutate(nyrs_minss = n_distinct(yr[n_sppgroupyr >= min_obs_per_yr])) %>%
+  ungroup() %>%
+  data.frame()
+onsett <- onsett %>%
+  filter(nyrs_minss >= min_yrs)
 
 # Add in functional group information
 onsett <- onsett %>%
@@ -1077,7 +1088,8 @@ onsett %>%
   summarize(n = n(),
             n_spp = n_distinct(common_name)) %>%
   data.frame()
-# Combining all forbs and grasses so there's more than one species per group
+# Combining all forbs and grasses so there's more than one species per 
+# functional group
 onsett <- onsett %>%
   mutate(func_group = case_when(
     functional_type %in% c("Forb", "Graminoid", "Semi-evergreen forb") ~
@@ -1085,7 +1097,7 @@ onsett <- onsett %>%
     .default = functional_type
   ))
 
-# Test cases to start...
+# See how many observations we have for each species, phenogroup
 onsett %>% select(common_name, phenogroup) %>% table()
 
 # Evaluating trends in yellow birch
@@ -1107,16 +1119,16 @@ ggplot(data = yebi, aes(x = yr, y = firstyes, color = site_id)) +
 # we specify the nestedness in the model formula. However, we may likely 
 # run into issues with singular fits...
 
-yebi_lf_bothr <- lmer(firstyes ~ yr + (1|site_id) + (1|individual_id),
-                      data = filter(yebi, phenogroup == "lf"))
-yebi_lf_indr <- lmer(firstyes ~ yr + (1|individual_id),
-                     data = filter(yebi, phenogroup == "lf"))
-yebi_lf_siter <- lmer(firstyes ~ yr + (1|site_id),
-                      data = filter(yebi, phenogroup == "lf"))
+summary(lmer(firstyes ~ yr + (1|site_id) + (1|individual_id),
+             data = filter(yebi, phenogroup == "lf")))
+summary(lmer(firstyes ~ yr + (1|individual_id),
+             data = filter(yebi, phenogroup == "lf")))
+summary(lmer(firstyes ~ yr + (1|site_id),
+             data = filter(yebi, phenogroup == "lf")))
 # All have issues with singularity
 
-yebi_lf_site <- lm(firstyes ~ yr + site_id,
-                   data = filter(yebi, phenogroup == "lf"))
+summary(lm(firstyes ~ yr + site_id,
+        data = filter(yebi, phenogroup == "lf")))
 
 filter(yebi, phenogroup == "lf" & yr == 2014)
 # Weird... 10 sites, 25 trees have onsets in 2014 but all the data look the same
@@ -1124,7 +1136,7 @@ filter(yebi, phenogroup == "lf" & yr == 2014)
 # 10 onsets at doy 152 with last no 12 days prior
 # Do all volunteers go out on same day?
 filter(yebi, phenogroup == "flo" & yr == 2015)
-# Even more extreme: 23 observations, all the same day
+# Even more extreme: 23 open flower onsets, all but one on the same day
 
 # Evaluating trends in bluebead
 blue <- filter(onsett, common_name == "bluebead") %>%
@@ -1152,40 +1164,151 @@ summary(lmer(firstyes ~ yr + (1|site_id),
              data = filter(blue, phenogroup == "frr")))
 # None of these are problematic
 
-# Evaluating trends in American beech
-beech <- filter(onsett, common_name == "American beech") %>%
+# Evaluating trends in mountain avens (lowest sample sizes of any species)
+moav <- filter(onsett, common_name == "mountain avens") %>%
   mutate(individual_id = factor(individual_id),
          site_id = factor(site_id))
-count(beech, yr) # 10 years
-count(beech, site_id) # 14 sites
-count(beech, individual_id) # 27 individuals
+count(moav, yr) # 10 years
+count(moav, site_id) # 8 sites
+count(moav, individual_id) # 8 individuals
 
-ggplot(data = beech, aes(x = yr, y = firstyes, color = site_id)) +
+ggplot(data = moav, aes(x = yr, y = firstyes, color = site_id)) +
   geom_point() +
   geom_smooth(method = lm,  fullrange = FALSE, aes(group = 1), color = "black") +
   facet_grid(.~phenogroup) + 
   theme(legend.position = "none")
 
 summary(lmer(firstyes ~ yr + (1|site_id),
-             data = filter(beech, phenogroup == "lf")))
-summary(lmer(firstyes ~ yr + (1|individual_id),
-             data = filter(beech, phenogroup == "lf")))
-# model with site RE has a lower (better) REML criterion than individual ID
+             data = filter(moav, phenogroup == "fl"))) # singular fit (n = 28)
+summary(lmer(firstyes ~ yr + (1|site_id), 
+             data = filter(moav, phenogroup == "flo"))) # n = 36
+summary(lmer(firstyes ~ yr + (1|site_id),
+             data = filter(moav, phenogroup == "fr"))) # singular fit (n = 34)
 
-summary(lmer(firstyes ~ yr + (1|site_id),
-             data = filter(beech, phenogroup == "lfe")))
-summary(lmer(firstyes ~ yr + (1|site_id),
-             data = filter(beech, phenogroup == "fl")))
-summary(lmer(firstyes ~ yr + (1|site_id),
-             data = filter(beech, phenogroup == "flo"))) # singular fit
-summary(lmer(firstyes ~ yr + (1|site_id),
-             data = filter(beech, phenogroup == "fr")))
-summary(lmer(firstyes ~ yr + (1|site_id),
-             data = filter(beech, phenogroup == "frr"))) # singular fit
-# Running into issues when sample sizes are small (<62), otherwise ok
+# Run analyses for each functional group?
+onsett %>% select(func_group, phenogroup) %>% table() 
+onsett %>%
+  group_by(func_group, common_name, phenogroup) %>%
+  summarize(n = n()) %>%
+  pivot_wider(names_from = phenogroup,
+              values_from = n)
+# Maybe should combine all trees since there are only 3 evergreen broadleaf spp?
 
+# For tree species, can only do random intercepts (not intercepts and slopes)
+tree_lf_sppr <- lmer(firstyes ~ yr + (1|common_name) + (1|site_id),
+                     data = filter(onsett, func_group != "Forb or grass",
+                                   phenogroup == "lf"))
+summary(tree_lf_sppr) # NS
+tree_lfe_sppr <- lmer(firstyes ~ yr + (1|common_name) + (1|site_id),
+                      data = filter(onsett, func_group != "Forb or grass",
+                                   phenogroup == "lfe"))
+summary(tree_lfe_sppr) # S (positive)
+tree_fl_sppr <- lmer(firstyes ~ yr + (1|common_name) + (1|site_id),
+                      data = filter(onsett, func_group != "Forb or grass",
+                                    phenogroup == "fl"))
+summary(tree_fl_sppr) # NS
+tree_flo_sppr <- lmer(firstyes ~ yr + (1|common_name) + (1|site_id),
+                      data = filter(onsett, func_group != "Forb or grass",
+                                    phenogroup == "flo"))
+summary(tree_flo_sppr)
+tree_fr_sppr <- lmer(firstyes ~ yr + (1|common_name) + (1|site_id),
+                     data = filter(onsett, func_group != "Forb or grass",
+                                    phenogroup == "fr"))
+summary(tree_fr_sppr) # NS (positive)
+tree_frr_sppr <- lmer(firstyes ~ yr + (1|common_name) + (1|site_id),
+                      data = filter(onsett, func_group != "Forb or grass",
+                                   phenogroup == "frr"))
+summary(tree_frr_sppr) # NS (negative)
 
+# Deciduous broadleaf 
+# There are 5-6 species for all phenogroups except frr. I'll try random 
+# effects, but not sure if that's a great idea.
+# db_lf_sppr <- lmer(firstyes ~ yr + (1|common_name) + (1|site_id),
+#                    data = filter(onsett, func_group == "Deciduous broadleaf",
+#                                  phenogroup == "lf"))
+# summary(db_lf_sppr)
+# db_lf_sppa <- lmer(firstyes ~ yr + common_name + (1|site_id),
+#                    data = filter(onsett, func_group == "Deciduous broadleaf",
+#                                  phenogroup == "lf"))
+# summary(db_lf_sppa)
+# db_lf_sppi <- lmer(firstyes ~ yr * common_name + (1|site_id),
+#                    data = filter(onsett, func_group == "Deciduous broadleaf",
+#                                  phenogroup == "lf"))
+# summary(db_lf_sppi)
+# db_lfe_sppr <- lmer(firstyes ~ yr + (1|common_name) + (1|site_id),
+#                     data = filter(onsett, func_group == "Deciduous broadleaf",
+#                                  phenogroup == "lfe"))
+# summary(db_lfe_sppr)
+# db_fl_sppr <- lmer(firstyes ~ yr + (1|common_name) + (1|site_id),
+#                     data = filter(onsett, func_group == "Deciduous broadleaf",
+#                                   phenogroup == "fl"))
+# summary(db_fl_sppr)
+# db_flo_sppr <- lmer(firstyes ~ yr + (1|common_name) + (1|site_id),
+#                     data = filter(onsett, func_group == "Deciduous broadleaf",
+#                                  phenogroup == "flo"))
+# summary(db_flo_sppr)
+# db_fr_sppr <- lmer(firstyes ~ yr + (1|common_name) + (1|site_id),
+#                   data = filter(onsett, func_group == "Deciduous broadleaf",
+#                                   phenogroup == "fr"))
+# summary(db_fr_sppr)
+# db_frr_sppa <- lmer(firstyes ~ yr + common_name + (1|site_id),
+#                     data = filter(onsett, func_group == "Deciduous broadleaf",
+#                                  phenogroup == "frr"))
+# summary(db_frr_sppa)
+# anova(db_frr_sppa)
 
+# Forbs and grasses
+forb_lf_sppr <- lmer(firstyes ~ yr + (1|common_name) + (1|site_id),
+                     data = filter(onsett, func_group == "Forb or grass",
+                                   phenogroup == "lf"))
+summary(forb_lf_sppr) # S (positive)
+forb_fl_sppr <- lmer(firstyes ~ yr + (1|common_name) + (1|site_id),
+                     data = filter(onsett, func_group == "Forb or grass",
+                                   phenogroup == "fl"))
+summary(forb_fl_sppr) # NS
+forb_flo_sppr <- lmer(firstyes ~ yr + (1|common_name) + (1|site_id),
+                     data = filter(onsett, func_group == "Forb or grass",
+                                   phenogroup == "flo"))
+summary(forb_flo_sppr) # S (negative)
+forb_fr_sppr <- lmer(firstyes ~ yr + (1|common_name) + (1|site_id),
+                     data = filter(onsett, func_group == "Forb or grass",
+                                   phenogroup == "fr"))
+summary(forb_fr_sppr) # NS
+forb_frr_sppr <- lmer(firstyes ~ yr + (1|common_name) + (1|site_id),
+                     data = filter(onsett, func_group == "Forb or grass",
+                                   phenogroup == "frr"))
+summary(forb_frr_sppr) # NS
+
+# Then run species-level analyses (plot all trends in a functional group
+# in same figure in report).
+
+onsett %>%
+  group_by(func_group, common_name, phenogroup) %>%
+  summarize(n = n()) %>%
+  pivot_wider(names_from = phenogroup,
+              values_from = n)
+
+# Forb/grass species - open flowers
+forb_flo_spp <- onsett %>%
+  filter(func_group == "Forb or grass" & phenogroup == "flo") %>%
+  pull(common_name) %>%
+  unique()
+for(i in 1:length(forb_flo_spp)) {
+  df <- onsett %>%
+    filter(common_name == forb_flo_spp[i] & phenogroup == "flo")
+  assign(paste0("spp", i),
+         lmer(firstyes ~ yr + (1|site_id), data = df))
+  if (isSingular(get(paste0("spp", i)))) {
+    message("Model for ", forb_flo_spp[i], " is Singular")
+  }
+}
+
+yrpred <- data.frame(yr = seq(min(onsett$yr), max(onsett$yr), length = 100),
+                     site_id = 0)
+
+# PICK UP HERE
+# See GLMM FAQ for prediction with CIs, though maybe for plotting species-level
+# trends we won't need that (if multiple going on the same figure panel)
 
 
 
