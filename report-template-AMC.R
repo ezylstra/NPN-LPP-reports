@@ -1045,70 +1045,67 @@ for (i in 1:n_plots) {
 
 # Set the maximum number of days between first yes and prior no
 prior_days_trends <- 14
-onsets <- onsets %>% filter(lastno <= prior_days_trends)
+onsett <- onsets %>% filter(lastno <= prior_days_trends)
 
 # Identify the first year with >= 15 observations and remove data before then
-yr_obs <- count(onsets, yr) %>% arrange(yr)
+yr_obs <- count(onsett, yr) %>% arrange(yr)
 min_yr <- yr_obs$yr[which(yr_obs$n >= 15)][1]
-onsets <- onsets %>% filter(yr >= min_yr)
+onsett <- onsett %>% filter(yr >= min_yr)
 
 # Calculate the number of years we have data for each species-phenophase group 
 # combination. (If phenology was likely to differ greatly by sites, then 
 # we would also want to limit analyses to sites that had multiple years of data)
-onsets <- onsets %>%
+onsett <- onsett %>%
   group_by(common_name, phenogroup) %>%
   mutate(n_yrs_sppgroup = n_distinct(yr)) %>%
   data.frame()
 
 # Set the minimum number of years a species-phenogroup was observed as well as 
-# the minimum number of observations a species-phenogrooup needs to have in 
+# the minimum number of observations a species-phenogroup needs to have in 
 # order to be included in analyses
 min_yrs <- 5
-min_obs_trends <- 15 
-onsets <- onsets %>%
+min_obs_trends <- 15
+onsett <- onsett %>%
   filter(n_yrs_sppgroup >= min_yrs) %>%
   filter(n_obs_sppgroup >= min_obs_trends)
 
 # Add in functional group information
-onsets <- onsets %>%
+onsett <- onsett %>%
   left_join(select(species, common_name, functional_type), by = "common_name")
-onsets %>%
+onsett %>%
   group_by(functional_type) %>%
   summarize(n = n(),
             n_spp = n_distinct(common_name)) %>%
   data.frame()
 # Combining all forbs and grasses so there's more than one species per group
-onsets <- onsets %>%
+onsett <- onsett %>%
   mutate(func_group = case_when(
-    functional_type %in% c("Forb", "Graminoid", "Semi-evergreen forb") ~ 
+    functional_type %in% c("Forb", "Graminoid", "Semi-evergreen forb") ~
       "Forb or grass",
     .default = functional_type
   ))
 
-# Test case to start...
-onsets %>% select(common_name, phenogroup) %>% table()
-# Evaluating trends in yellow birch
-yebi <- filter(onsets, common_name == "yellow birch")
-count(yebi, yr) # 10 years
-count(yebi, site_id) # 12 sites
-count(yebi, individual_id) #29 sites
+# Test cases to start...
+onsett %>% select(common_name, phenogroup) %>% table()
 
-yebi <- yebi %>%
+# Evaluating trends in yellow birch
+yebi <- filter(onsett, common_name == "yellow birch") %>%
   mutate(individual_id = factor(individual_id),
          site_id = factor(site_id))
+count(yebi, yr) # 10 years
+count(yebi, site_id) # 12 sites
+count(yebi, individual_id) # 29 sites
+
+ggplot(data = yebi, aes(x = yr, y = firstyes, color = site_id)) +
+  geom_point() +
+  geom_smooth(method = lm,  fullrange = FALSE, aes(group = 1), color = "black") +
+  facet_grid(.~phenogroup) + 
+  theme(legend.position = "none")
 
 # Note that individual IDs are implicitly nested in sites (each individual_ID
 # is only associated with one site), so we don't need to worry about how
 # we specify the nestedness in the model formula. However, we may likely 
 # run into issues with singular fits...
-
-# Leaves
-ggplot(data = filter(yebi, phenogroup == "lf"), 
-       aes(x = yr, y = firstyes)) +
-  geom_point()
-ggplot(data = filter(yebi, phenogroup == "lf"), 
-       aes(x = yr, y = firstyes, color = site_id)) +
-  geom_point()
 
 yebi_lf_bothr <- lmer(firstyes ~ yr + (1|site_id) + (1|individual_id),
                       data = filter(yebi, phenogroup == "lf"))
@@ -1126,6 +1123,70 @@ filter(yebi, phenogroup == "lf" & yr == 2014)
 # 15 onsets at doy 104 with last no 6 days prior
 # 10 onsets at doy 152 with last no 12 days prior
 # Do all volunteers go out on same day?
+filter(yebi, phenogroup == "flo" & yr == 2015)
+# Even more extreme: 23 observations, all the same day
+
+# Evaluating trends in bluebead
+blue <- filter(onsett, common_name == "bluebead") %>%
+  mutate(individual_id = factor(individual_id),
+         site_id = factor(site_id))
+count(blue, yr) # 10 years
+count(blue, site_id) # 34 sites
+count(blue, individual_id) # 34 individuals
+
+ggplot(data = blue, aes(x = yr, y = firstyes, color = site_id)) +
+  geom_point() +
+  geom_smooth(method = lm,  fullrange = FALSE, aes(group = 1), color = "black") +
+  facet_grid(.~phenogroup) + 
+  theme(legend.position = "none")
+
+summary(lmer(firstyes ~ yr + (1|site_id),
+             data = filter(blue, phenogroup == "lf")))
+summary(lmer(firstyes ~ yr + (1|site_id),
+             data = filter(blue, phenogroup == "fl")))
+summary(lmer(firstyes ~ yr + (1|site_id),
+             data = filter(blue, phenogroup == "flo")))
+summary(lmer(firstyes ~ yr + (1|site_id),
+             data = filter(blue, phenogroup == "fr")))
+summary(lmer(firstyes ~ yr + (1|site_id),
+             data = filter(blue, phenogroup == "frr")))
+# None of these are problematic
+
+# Evaluating trends in American beech
+beech <- filter(onsett, common_name == "American beech") %>%
+  mutate(individual_id = factor(individual_id),
+         site_id = factor(site_id))
+count(beech, yr) # 10 years
+count(beech, site_id) # 14 sites
+count(beech, individual_id) # 27 individuals
+
+ggplot(data = beech, aes(x = yr, y = firstyes, color = site_id)) +
+  geom_point() +
+  geom_smooth(method = lm,  fullrange = FALSE, aes(group = 1), color = "black") +
+  facet_grid(.~phenogroup) + 
+  theme(legend.position = "none")
+
+summary(lmer(firstyes ~ yr + (1|site_id),
+             data = filter(beech, phenogroup == "lf")))
+summary(lmer(firstyes ~ yr + (1|individual_id),
+             data = filter(beech, phenogroup == "lf")))
+# model with site RE has a lower (better) REML criterion than individual ID
+
+summary(lmer(firstyes ~ yr + (1|site_id),
+             data = filter(beech, phenogroup == "lfe")))
+summary(lmer(firstyes ~ yr + (1|site_id),
+             data = filter(beech, phenogroup == "fl")))
+summary(lmer(firstyes ~ yr + (1|site_id),
+             data = filter(beech, phenogroup == "flo"))) # singular fit
+summary(lmer(firstyes ~ yr + (1|site_id),
+             data = filter(beech, phenogroup == "fr")))
+summary(lmer(firstyes ~ yr + (1|site_id),
+             data = filter(beech, phenogroup == "frr"))) # singular fit
+# Running into issues when sample sizes are small (<62), otherwise ok
+
+
+
+
 
 
 #- Yet to work on... ----------------------------------------------------------#
