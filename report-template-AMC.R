@@ -12,7 +12,8 @@ require(ggplot2)
 require(terra)
 require(lme4)
 require(ggeffects) # Predictions & plotting for mixed-effect models
-# require(lmerTest) # Not sure I want this...
+# require(lmerTest) # Don't want to load this (but will call in script)
+
 # require(geosphere) # for optional site clustering
 # require(fpc) # for optional site clustering
 # require(RColorBrewer)
@@ -21,10 +22,10 @@ rm(list = ls())
 
 #- Specify data of interest ---------------------------------------------------#
 # Name and nickname of LPP
-lpp <- "Appalachian Mountain Club"
-lpp_short <- "amc"
-# lpp <- "Earth"
-# lpp_short <- 
+# lpp <- "Appalachian Mountain Club"
+# lpp_short <- "amc"
+lpp <- "Earthwise Aware"
+lpp_short <- "ewa"
 
 # Specify years of interest
 all_yrs <- 2007:2023
@@ -42,7 +43,8 @@ if (!file.exists(si_csv_name)) {
   # Get list of LPP network ID(s)
   network_ids <- npn_groups()
   network_id <- network_ids %>%
-    filter(str_detect(network_name, lpp))
+    filter(str_detect(network_name, lpp)) %>%
+    filter(str_detect(network_name, "deprecated", negate = TRUE))
   if (nrow(network_id) == 1) {
     message("Good news: One network_id found for LPP")
     lpp_id <- network_id$network_id
@@ -1328,6 +1330,3 @@ for (i in 1:nrow(func_groups_df)) {
 # phenophases occur since that could happen over long period or multiple times
 # a year. 
 
-#NEXT (and related to point above): Do we want to also create visualizations for 
-# weekly proportions of observations in a particular phenoclass/group? 
-# (using GAMs or something else?). Yes
