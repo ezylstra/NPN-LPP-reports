@@ -304,12 +304,18 @@ si_sub_plants <- si %>%
           desc(phenophase_status), desc(intensity)) 
 
   # A little data exploration...
-  # For each species, there is only 1 phenophase per pheno class.
-    # si_sub_plants %>%
+  # For each species, there is only 1 phenophase per pheno class EXCEPT:
+  # common lilac: Open flowers (205) and Full flowering (206) both in 
+  # phenophase class 7 (Open flowers or pollen cones)
+    # phaseperclass <- si_sub_plants %>%
     #   group_by(common_name, class_id) %>%
     #   summarize(n_phenophases = length(unique(phenophase_id)),
     #             .groups = "keep") %>%
     #   data.frame()
+    # filter(phaseperclass, n_phenophases > 1)
+    # count(filter(si, common_name == "common lilac" & class_id == 7), 
+    #       phenophase_id, phenophase_description)
+    # filter(pheno_list, class_id == 7)
   # For each species, may have more than 1-3 phenophases per pheno group
     # si_sub_plants %>%
     #   group_by(common_name, pheno_group) %>%
@@ -364,6 +370,8 @@ si_sub_plants <- si %>%
     #   data.frame()
     # count(filter(si_sub_plants, common_name == "yellow birch", phenophase_id == "483"),
     #       intensity_category_id) # 40, 73, or NA
+    # count(filter(si_sub_plants, common_name == "American chestnut", phenophase_id == "371"),
+    #       intensity_category_id) 
   # No, but I think that's because the counts include intensity categories of NA
   # and because the intensity category may have shifted over time:
     # count(filter(si_sub_plants, common_name == "yellow birch", phenophase_id == "483"),
@@ -373,15 +381,16 @@ si_sub_plants <- si %>%
     #   summarize(int_cat = length(unique(intensity_category_id[!is.na(intensity_category_id)])),
     #             .groups = "keep") %>%
     #   data.frame()
-    # count(test, int_cat) 
+    # count(test, int_cat)
   # In a single year, only one intensity category (if any) for that plant, phenophase
 
 # All this means that we put data in wide form, with 2 columns for each 
 # plant phenophase: status, intensity
 
 # Putting data in wide form:
-# Can use phenophase class_id instead of phenophase_id because there's a maximum
-# of one phenophase per class for each species.
+# First, will remove any full flowering observations for lilac (if they're in 
+# there). Then can use phenophase class_id instead of phenophase_id because 
+# there's a maximum of one phenophase per class for each species.
 
 # Create a table with info/names for each plant phenophase class    
 pheno_list <- pheno_list %>%
@@ -432,6 +441,7 @@ pl_pheno_classes <- pheno_list %>%
 
 # Put in wide form
 plant_obs <- si_sub_plants %>%
+  filter(phenophase_id != 206) %>%
   left_join(select(pl_pheno_classes, class_id, class_id2), 
             by = "class_id") %>%
   select(-c(phenophase_id, phenophase_description, pheno_group, intensity_value, 
@@ -1003,7 +1013,7 @@ onsets <- onsets %>%
 
 # Set minimum number of observations per species-phenogroup to summarize onset 
 # dates
-min_obs <- 15
+min_obs <- 10 # used 15 previously
 
 # Plot onset for one phenogroup by species (lumping years, sites together)
 ggplot(data = filter(onsets, phenogroup == "flo", n_obs_sppgroup >= min_obs),   

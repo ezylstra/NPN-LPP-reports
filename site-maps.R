@@ -20,16 +20,18 @@ map <- ggmap::get_stadiamap(bbox = bb,
                             maptype = maptype, 
                             color = mapcol,
                             force = TRUE, 
-                            zoom = 7)
+                            zoom = 13)
 # Note: can save a ggmap object to a RData file and then read it back with load
 # save(map, file = "xxx.RData")
 # load(file = "xxx.RData")
+#TODO: Figure out how to automate the zoom argument based on the scale of 
+# observations. zoom = 7 worked for AMC; zoom 13 worked for EWA.
 
 sites_map <- ggmap(map) +
   geom_point(data = sites, aes(x = longitude, y = latitude),
              color = "blue", alpha = 0.3, size = 2.5) +
   theme_void() # gets rid of axes completely
-
+sites_map
 # If we want to save map object without any surrounding white space by 
 # specifying either the height or width of an object, we need to know the ratio
 # (width to height). Using tmaptools to do that
