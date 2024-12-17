@@ -1108,16 +1108,17 @@ onsett %>%
   summarize(n = n()) %>%
   pivot_wider(names_from = phenogroup,
               values_from = n)
-# Combine trees since there are only 3 evergreen broadleaf spp?
 
 # Running two models for each functional group - phenophase: 
 # 1) RS = models that specify random slopes for each species and random 
 #    intercepts for each site, species, individual. If these ran without issues
-#    we wouldn't run the 2nd model. However, they often (always?) have issues 
-#    with singular fits, and the the variance component associated with random 
+#    we wouldn't run the 2nd model. However, they often have issues with
+#    singular fits where the the variance component associated with random 
 #    slopes is 0. Still useful to get that overall trend for the functional 
-#    group that accounts repeated measures. 
-# 2) FS = models that include species as fixed effects and site, individual 
+#    group that accounts for repeated measures. Note that we only attempted 
+#    these models if there were 4 or more species. If not, we excluded species
+#    from the random part of the model.
+# 2) FS = models that have yr * species as fixed effects and site, individual 
 #    random intercepts.
 # Using ggeffects package to make and plot predictions
 # https://strengejacke.github.io/ggeffects/articles/introduction_randomeffects.html
@@ -1149,13 +1150,21 @@ pl_pheno_match <- pl_pheno_classes %>%
                                           "Flower senescence",
                                           "Fruit",
                                           "Ripe fruit",
-                                          "Leaf senescence")))
+                                          "Leaf senescence"))) %>%
+  distinct()
 onsett <- onsett %>%
   left_join(pl_pheno_match, by = "phenogroup")
 
 func_groups_df <- data.frame(
   func_group = unique(onsett$func_group),
   func_group2 = str_replace_all(unique(onsett$func_group), " ", "_"))
+
+# Create function to identify models that failed to converge
+is_warning_generated <- function(m) {
+  df <- summary(m)
+  !is.null(df$optinfo$conv$lme4$messages) && 
+    sum(grepl('failed to converge', df$optinfo$conv$lme4$messages)) > 0
+}
 
 for (i in 1:nrow(func_groups_df)) {
   fgroup <- func_groups_df$func_group[i]
@@ -1164,19 +1173,51 @@ for (i in 1:nrow(func_groups_df)) {
   # Run mixed models
   for (phenog in phenogs) {
     dat <- filter(onsett, func_group == fgroup, phenogroup == phenog)
-    RSm <- lmer(firstyes ~ yr + (0 + yr|common_name) + (1|common_name) + 
-                  (1|site_id) + (1|individual_id), data = dat)
-    FSm <- lmer(firstyes ~ yr * common_name + (1|site_id) + (1|individual_id),
-                data = dat)
+    if (n_distinct(dat$common_name) >= 4) {
+      suppressWarnings(
+        RSm <- lmer(firstyes ~ yr + (0 + yr|common_name) + (1|common_name) + 
+                    (1|site_id) + (1|individual_id), data = dat)
+      )
+      if (is_warning_generated(RSm)) {
+        RSm <- lmer(firstyes ~ yr + (0 + yr|common_name) + (1|common_name) + 
+                      (1|site_id) + (1|individual_id), data = dat,
+                    control = lmerControl(optimizer = "Nelder_Mead"))
+        if (is_warning_generated(RSm)) {
+          print(paste0("Model failed to converge for RSm: ", fgroup, ", ", phenog))
+        }
+      }
+    } else {
+      suppressWarnings(
+        RSm <- lmer(firstyes ~ yr + (1|site_id) + (1|individual_id), data = dat)
+      )
+      if (is_warning_generated(FSm)) {
+        RSm <- lmer(firstyes ~ yr + (1|site_id) + (1|individual_id), data = dat,
+                    control = lmerControl(optimizer = "Nelder_Mead"))
+        if (is_warning_generated(RSm)) {
+          print(paste0("Model failed to converge for RSm: ", fgroup, ", ", phenog))
+        }
+      }
+    }
+    suppressWarnings(
+      FSm <- lmer(firstyes ~ yr * common_name + (1|site_id) + (1|individual_id),
+                  data = dat)
+    )
+    if (is_warning_generated(FSm)) {
+      FSm <- lmer(firstyes ~ yr * common_name + (1|site_id) + (1|individual_id),
+                  data = dat, control = lmerControl(optimizer = "Nelder_Mead"))
+    }
     RSp <- data.frame(predict_response(RSm, terms = "yr")) %>%
       mutate(group = "mean", 
              func_group = fgroup,
              phenogroup = phenog) %>%
-      rename(yr = x, spp = group)
+      rename(yr = x, spp = group) %>%
+      mutate(modeled_spp = if_else(n_distinct(dat$common_name) >= 4, 
+                                   "random", "none"))
     FSp <- data.frame(predict_response(FSm, terms = c("yr", "common_name"))) %>%
       mutate(func_group = fgroup,
              phenogroup = phenog) %>%
-      rename(yr = x, spp = group)  
+      rename(yr = x, spp = group) %>%
+      mutate(modeled_spp = "fixed")
     preds_new <- rbind(RSp, FSp)
     if (phenog == phenogs[1]) {
       preds <- preds_new
@@ -1192,20 +1233,52 @@ for (i in 1:nrow(func_groups_df)) {
     for (spp in sppdat$common_name) {
       preds$predicted[preds$spp == spp & preds$yr < sppdat$minyr[sppdat$common_name == spp]] <- NA 
       preds$conf.low[preds$spp == spp & preds$yr < sppdat$minyr[sppdat$common_name == spp]] <- NA 
-      preds$conf.high[preds$spp == spp & preds$yr < sppdat$minyr[sppdat$common_name == spp]] <- NA 
+      preds$conf.high[preds$spp == spp & preds$yr < sppdat$minyr[sppdat$common_name == spp]] <- NA
+      preds$std.error[preds$spp == spp & preds$yr < sppdat$minyr[sppdat$common_name == spp]] <- NA 
       preds$predicted[preds$spp == spp & preds$yr > sppdat$maxyr[sppdat$common_name == spp]] <- NA 
       preds$conf.low[preds$spp == spp & preds$yr > sppdat$maxyr[sppdat$common_name == spp]] <- NA 
       preds$conf.high[preds$spp == spp & preds$yr > sppdat$maxyr[sppdat$common_name == spp]] <- NA 
+      preds$std.error[preds$spp == spp & preds$yr > sppdat$maxyr[sppdat$common_name == spp]] <- NA 
+    }
+  
+    # Extract estimate of trends for functional groups
+    suppressWarnings(RSmt <- lmerTest::as_lmerModLmerTest(RSm))
+    trend <- summary(RSmt)$coefficients["yr", ]
+    re_names <- names(summary(RSm)$varcor)
+    # est, SE, df, t, P  
+    
+    trends_new <- data.frame(
+      func_group = fgroup,
+      phenogroup = phenog,
+      nobs = nrow(dat),
+      nspp = n_distinct(dat$common_name),
+      minyr = min(dat$yr),
+      maxyr = max(dat$yr),
+      random_slopes = ifelse("common_name.1" %in% re_names, 
+                             "Yes", "No"),
+      random_ints = str_c(str_subset(re_names, ".1", negate = TRUE), 
+                          collapse = ", "),
+      beta = round(trend["Estimate"], 5),
+      se = round(trend["Std. Error"], 5),
+      df = round(trend["df"]),
+      t = round(trend["t value"], 3),
+      P = round(trend["Pr(>|t|)"], 4),
+      row.names = NULL
+    )
+    if (phenog == phenogs[1]) {
+      trends <- trends_new
+    } else {
+      trends <- rbind(trends, trends_new)
     }
   }
-  # Will likely get some warnings about convergence (and maybe other stuff, but
-  # hopefully none of it is prohibitive)
-  #TODO: figure out how to find models that actually had "Model failed to converge" errors
-  
+  # Will likely get some warnings about singular fits (and maybe other stuff,
+  # but hopefully none of it is prohibitive)
+
   preds <- preds %>%
     left_join(pl_pheno_match, by = "phenogroup")
   
-  # Create nice labels for dates on Y axes
+
+  # Create nice labels for dates on Y axes in plots
   plotdat <- filter(onsett, func_group == fgroup)
   mindoy <- min(plotdat$firstyes)
   maxdoy <- max(plotdat$firstyes)
@@ -1223,6 +1296,7 @@ for (i in 1:nrow(func_groups_df)) {
                 alpha = 0.1) +
     geom_point(data = plotdat,
                aes(x = yr, y = firstyes, color = common_name),
+               position = position_dodge(width = 0.3),
                size = 0.6, alpha = 0.4) +
     geom_line(data = filter(preds, spp == "mean"),
               aes(x = yr, y = predicted), linewidth = 1) +
@@ -1234,26 +1308,18 @@ for (i in 1:nrow(func_groups_df)) {
     theme_bw() +
     theme(axis.title.x = element_blank(),
           panel.grid.major = element_blank(),
-          panel.grid.minor = element_blank())
+          panel.grid.minor = element_blank(), 
+          legend.position = "bottom")
   )
 
   assign(paste0("preds_", func_groups_df$func_group2[i]), preds)
+  assign(paste0("trends_", func_groups_df$func_group2[i]), trends)
 }
 
 # For each functional group, have:
 # trendsplot_FUNC = ggplot object with a panel for each phenophase
 # preds_FUNC = table with trend predictions (and 95% CIs)
-
-#NEXT:
-# Find models with: "Model failed to converge" (here, Deciduous trees)
-# Text describing "significance"
-# Colors ok for now?
-# Jitter points?
-
-
-
-
-
+# trends_FUNC = table with trend estimates
 
 #- Yet to work on... ----------------------------------------------------------#
 
