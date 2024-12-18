@@ -20,7 +20,7 @@ map <- ggmap::get_stadiamap(bbox = bb,
                             maptype = maptype, 
                             color = mapcol,
                             force = TRUE, 
-                            zoom = 13)
+                            zoom = 7)
 # Note: can save a ggmap object to a RData file and then read it back with load
 # save(map, file = "xxx.RData")
 # load(file = "xxx.RData")
@@ -29,7 +29,7 @@ map <- ggmap::get_stadiamap(bbox = bb,
 
 sites_map <- ggmap(map) +
   geom_point(data = sites, aes(x = longitude, y = latitude),
-             color = "blue", alpha = 0.3, size = 2.5) +
+             color = "blue", alpha = 0.3, size = 1.5) +
   theme_void() # gets rid of axes completely
 sites_map
 # If we want to save map object without any surrounding white space by 
@@ -38,7 +38,7 @@ sites_map
 asp <- tmaptools::get_asp_ratio(bb)
 
 width <- 5
-ggsave("C:/Users/erin/Desktop/test-ggmap.png",
+ggsave(paste0("output/map-", lpp_short, ".png"),
        sites_map,
        width = width,
        height = width / asp,

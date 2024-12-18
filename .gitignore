@@ -10,3 +10,7 @@ npn-data/*
 # Climate data (because they're often big files)
 climate-data/*
 !climate-data/.gitkeep
+
+# Output
+output/*
+!output/.gitkeep
