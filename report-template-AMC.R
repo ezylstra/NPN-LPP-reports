@@ -22,10 +22,10 @@ rm(list = ls())
 
 #- Specify data of interest ---------------------------------------------------#
 # Name and nickname of LPP
-# lpp <- "Appalachian Mountain Club"
-# lpp_short <- "amc"
-lpp <- "Earthwise Aware"
-lpp_short <- "ewa"
+lpp <- "Appalachian Mountain Club"
+lpp_short <- "amc"
+# lpp <- "Earthwise Aware"
+# lpp_short <- "ewa"
 
 # Specify years of interest
 all_yrs <- 2007:2023
@@ -675,6 +675,84 @@ yearst <- yearst %>%
   mutate(across(obs_animal:obs_plant,  ~ replace_na(.x, 0))) %>%
   mutate(obs_total = obs_animal + obs_plant)
 #TODO: Decide whether we want filters for number of sites or observations
+
+# write.table(yearst, "clipboard", sep = "\t", row.names = FALSE)
+
+#- Table: Species summaries ---------------------------------------------------#
+# Recreating species table after removing years with few observations
+
+yrs_subset <- yearst$yr[yearst$obs_total > 25]
+
+species2 <- si %>%
+  filter(yr %in% yrs_subset) %>%
+  group_by(kingdom, common_name) %>%
+  summarize(n_sites = length(unique(site_id)),
+            n_individuals = length(unique(individual_id)),
+            n_observers = length(unique(person_id)),
+            n_yrs = length(unique(yr)),
+            yr_first = min(yr),
+            yr_last = max(yr),
+            .groups = "keep") %>%
+  data.frame() %>%
+  left_join(select(species, common_name, functional_type), by = "common_name")
+
+# Use the plant/animal_obs2 dataframes to calculate frequency (number of days
+# between observations within a given year). Note that we're not differentiating
+# between phenophases here. 
+freq_pl <- plant_obs2 %>%
+  select(site_id, common_name, individual_id, day_of_year, yr) %>%
+  filter(yr %in% yrs_subset) %>%
+  arrange(common_name, individual_id, yr, day_of_year)
+freq_pl$interval <- NA
+for (i in 2:nrow(freq_pl)) {
+  if (freq_pl$individual_id[i] == freq_pl$individual_id[i - 1] &
+      freq_pl$yr[i] == freq_pl$yr[i - 1]) {
+    freq_pl$interval[i] <- freq_pl$day_of_year[i] - freq_pl$day_of_year[i - 1]
+  } 
+}
+freqs_pl <- freq_pl %>%
+  group_by(common_name, individual_id, yr) %>%
+  summarize(nobs = n(), 
+            interval = median(interval, na.rm = TRUE),
+            .groups = "keep") %>%
+  data.frame() %>%
+  group_by(common_name) %>%
+  summarize(nobs_mn = round(mean(nobs)),
+            interval_mn = round(mean(interval, na.rm = TRUE), 1)) %>%
+  data.frame()
+
+# For animals, just using live observations
+freq_an <- animal_obs2 %>%
+  filter(pheno_group == "Live observation") %>%
+  select(site_id, common_name, individual_id, day_of_year, yr) %>%
+  distinct() %>%
+  filter(yr %in% yrs_subset) %>%
+  arrange(common_name, individual_id, yr, day_of_year)
+freq_an$interval <- NA
+for (i in 2:nrow(freq_an)) {
+  if (freq_an$individual_id[i] == freq_an$individual_id[i - 1] &
+      freq_an$yr[i] == freq_an$yr[i - 1]) {
+    freq_an$interval[i] <- freq_an$day_of_year[i] - freq_an$day_of_year[i - 1]
+  } 
+}
+freqs_an <- freq_an %>%
+  group_by(common_name, individual_id, yr) %>%
+  summarize(nobs = n(), 
+            interval = median(interval, na.rm = TRUE),
+            .groups = "keep") %>%
+  data.frame() %>%
+  group_by(common_name) %>%
+  summarize(nobs_mn = round(mean(nobs)),
+            interval_mn = round(mean(interval, na.rm = TRUE), 1)) %>%
+  data.frame()
+
+freqs <- rbind(freqs_pl, freqs_an) %>%
+  rename(nobs_mn_per_yrind = nobs_mn,
+         interval_mn_per_yrind = interval_mn)
+species2 <- species2 %>%
+  left_join(freqs, by = "common_name")
+
+# write.table(species2, "clipboard", sep = "\t", row.names = FALSE)
 
 #- Map(s) ---------------------------------------------------------------------#
 
