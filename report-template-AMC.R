@@ -1071,12 +1071,12 @@ onsets <- onsets %>%
                                           "Leaves")))
 
 # Assign colors for each phenophase group
-color_vec <- c("#7fbf7b",   # Leaves
-               "#e9a3c9",   # Flowers
-               "#c51b7d",   # Open flowers
+color_vec <- c("#b2df8a",   # Leaves
+               "#fdbf6f",   # Flowers
+               "#ff7f00",   # Open flowers
                "#b2beb5",   # Flower senescence
-               "#e7d4e8",   # Fruits
-               "#af8dc3",   # Ripe fruits
+               "#cab2d6",   # Fruits
+               "#6a3d9a",   # Ripe fruits
                "#8c510a")   # Leaf senescence
 # Name vector so colors are consistent across figures (in case not all levels 
 # are present in all figures)
@@ -1089,24 +1089,106 @@ onsets <- onsets %>%
   ungroup() %>%
   data.frame()
 
+# Add in functional group information
+onsets <- onsets %>%
+  left_join(select(species, common_name, functional_type), by = "common_name")
+onsets %>%
+  group_by(functional_type) %>%
+  summarize(n = n(),
+            n_spp = n_distinct(common_name)) %>%
+  data.frame()
+# Combining all forbs and grasses so there's more than one species per 
+# functional group
+onsets <- onsets %>%
+  mutate(func_group = case_when(
+    functional_type %in% c("Forb", "Graminoid", 
+                           "Semi-evergreen forb", "Evergreen forb") ~
+      "Forb or grass",
+    .default = functional_type
+  ))
+
 # Set minimum number of observations per species-phenogroup to summarize onset 
 # dates
-min_obs <- 10 # used 15 previously
+min_obs <- 15
 
-# Plot onset for one phenogroup by species (lumping years, sites together)
-ggplot(data = filter(onsets, phenogroup == "flo", n_obs_sppgroup >= min_obs),   
-       aes(x = common_name, y = firstyes)) +
-  geom_boxplot(varwidth = TRUE) + 
-  labs(y = "Onset DOY - Open flowers") +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
-        axis.title.x = element_blank())
-# Note: by using the varwidth argument, width of boxplots are proportional
-# to the square root of the number of observations
+# Plot onset for one phenogroup by species (lumping years, sites together).
+# Functional groups in facets
+
+phenogs <- c("lf", "fl", "flo", "fr", "frr", "lfe")
+phenogs2 <- c("leaves", "flowers", "open flowers", "fruit", "ripe fruit",
+              "leaf senescence")
+onsets_plot_width <- 6.5
+onsets_plot_heightmax <- 6.5
+total_nspp <- n_distinct(onsets$common_name[onsets$n_obs_sppgroup >= min_obs])
+
+for (i in 1:length(phenogs)) {
+  
+  phenog <- phenogs[i]
+  
+  # Create nice labels for dates on Y axes in plots
+  plotdat <- filter(onsets, phenogroup == phenog, n_obs_sppgroup >= min_obs)
+  mindoy <- min(plotdat$firstyes)
+  maxdoy <- max(plotdat$firstyes)
+  doys <- seq(mindoy, maxdoy)
+  plotdates <- as.Date(paste(2023, doys, sep = "-"), "%Y-%j")
+  date1ind <- which(day(plotdates) == 1)
+  doybreaks <- doys[date1ind]
+  datebreaks <- plotdates[date1ind] %>% format("%m/%d")
+  
+  # Calculate height of figure
+  plot_nspp <- n_distinct(plotdat$common_name)
+  onsets_plot_height <- onsets_plot_heightmax * (plot_nspp / total_nspp) + 0.5
+  
+  assign(paste0("onsets_plot_", phenog),
+   ggplot(data = plotdat, aes(x = common_name, y = firstyes)) +
+     geom_boxplot(varwidth = TRUE) + 
+     labs(title = paste0("First observation of ", phenogs2[i])) +
+     facet_grid(func_group~., scales = "free_y", space = "free") +
+     scale_y_continuous(breaks = doybreaks, labels = datebreaks) +
+     coord_flip() +
+     theme(axis.title = element_blank())
+  )
+  # Note: by using the varwidth argument, width of boxplots are proportional
+  # to the square root of the number of observations
+  
+  ggsave(paste0("output/onsets-plot-", phenog, "-", lpp_short, ".png"),
+         get(paste0("onsets_plot_", phenog)),
+         width = onsets_plot_width,
+         height = onsets_plot_height,
+         units = "in", 
+         dpi = 600)
+  
+}
+# Saved a ggplot object for each phenogroup: onsets_plot_PG
+# and saved each to file
 
 # Plot species, phenophase group combos with a minimum number of observations
+# Only include spp that have sufficient sample sizes for 3 or more phenophases
 onsets_sub <- onsets %>%
-  filter(n_obs_sppgroup >= min_obs)
+  filter(n_obs_sppgroup >= min_obs) %>%
+  group_by(common_name) %>%
+  mutate(n_phenogroups = n_distinct(phenogroup)) %>%
+  ungroup() %>%
+  data.frame() %>%
+  filter(n_phenogroups > 2)
+  
 spp <- sort(unique(onsets_sub$common_name))
+
+# Create nice labels for dates on X axes in plots
+mindoy <- min(onsets_sub$firstyes)
+maxdoy <- max(onsets_sub$firstyes)
+doys <- seq(mindoy, maxdoy)
+plotdates <- as.Date(paste(2023, doys, sep = "-"), "%Y-%j")
+date1ind <- which(day(plotdates) == 1)
+doybreaks <- doys[date1ind]
+datebreaks <- plotdates[date1ind] %>% format("%m/%d")
+datelims <- c(min(doys), max(doys) + 10)
+
+# Function to help add sample sizes to plot (95% of the way across date axis)
+n_fun <- function(x) {
+  return(data.frame(y = 0.99 * datelims[2],
+                    label = length(x)))
+}
 
 # Plot onset dates for each species, 4 at a time
 n_plots <- ceiling(length(spp) / 4)
@@ -1115,21 +1197,32 @@ for (i in 1:n_plots) {
   assign(paste0("onsets_p", i),
          ggplot(data = filter(onsets_sub, common_name %in% spps),
                 aes(x = group_labels, y = firstyes, fill = group_labels)) +
-           geom_boxplot(varwidth = TRUE) +
-           ylim(min(onsets_sub$firstyes), max(onsets_sub$firstyes)) +
+           geom_boxplot() +
+           stat_summary(fun.data = n_fun, geom = "text", hjust = 0.5, 
+                        family = "sans", size = 3) +
+           scale_y_continuous(limits = datelims, breaks = doybreaks, 
+                              labels = datebreaks) +
+           # ylim(min(onsets_sub$firstyes), max(onsets_sub$firstyes)) +
            facet_wrap(~ common_name, ncol = 1) +
            scale_fill_manual(values = color_vec) +
-           labs(x = "", y = "Onset day of year") +
+           labs(x = "", y = "First day observed") +
            coord_flip() +
-           theme(legend.position = "none"))
+           theme_bw() +
+           theme(legend.position = "none",
+                 axis.text.x = element_text(size = 9), 
+                 axis.text.y = element_text(size = 9),
+                 strip.text = element_text(size = 9))
+         )
+  ggsave(paste0("output/onsets-plot-spp-", lpp_short, "-", i, ".png"),
+         get(paste0("onsets_p", i)),
+         width = onsets_plot_width,
+         height = 8,
+         units = "in", 
+         dpi = 600)
 }
-for (i in 1:n_plots) {
-  print(get(paste0("onsets_p",i)))
-}
-# May want to create species boxplots by region (ie, site "cluster") if sites
-# are spread out geographically.
-#TODO: See whether its a good idea to have variable boxplot widths IF they're
-# only relative to other distributions for the same species. First, determine if that's true.
+# for (i in 1:n_plots) {
+#   print(get(paste0("onsets_p",i)))
+# }
 
 #- Trends in onset dates ------------------------------------------------------#
 
