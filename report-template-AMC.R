@@ -9,6 +9,7 @@ require(dplyr)
 require(lubridate)
 require(stringr)
 require(ggplot2)
+require(ggforce) # Nice facet options for ggplot
 require(terra)
 require(lme4)
 require(ggeffects) # Predictions & plotting for mixed-effect models
@@ -1115,7 +1116,7 @@ min_obs <- 15
 # Functional groups in facets
 
 phenogs <- c("lf", "fl", "flo", "fr", "frr", "lfe")
-phenogs2 <- c("leaves", "flowers", "open flowers", "fruit", "ripe fruit",
+phenogs2 <- c("leaves", "flowers", "open flowers", "fruits", "ripe fruits",
               "leaf senescence")
 onsets_plot_width <- 6.5
 onsets_plot_heightmax <- 6.5
@@ -1124,6 +1125,7 @@ total_nspp <- n_distinct(onsets$common_name[onsets$n_obs_sppgroup >= min_obs])
 for (i in 1:length(phenogs)) {
   
   phenog <- phenogs[i]
+  col <- color_vec[str_to_sentence(phenogs2[i])]
   
   # Create nice labels for dates on Y axes in plots
   plotdat <- filter(onsets, phenogroup == phenog, n_obs_sppgroup >= min_obs)
@@ -1134,6 +1136,13 @@ for (i in 1:length(phenogs)) {
   date1ind <- which(day(plotdates) == 1)
   doybreaks <- doys[date1ind]
   datebreaks <- plotdates[date1ind] %>% format("%m/%d")
+  datelims <- c(min(doys), max(doys) + 10)
+  
+  # Function to help add sample sizes to plot (95% of the way across date axis)
+  n_fun <- function(x) {
+    return(data.frame(y = 0.99 * datelims[2],
+                      label = length(x)))
+  }
   
   # Calculate height of figure
   plot_nspp <- n_distinct(plotdat$common_name)
@@ -1141,12 +1150,19 @@ for (i in 1:length(phenogs)) {
   
   assign(paste0("onsets_plot_", phenog),
    ggplot(data = plotdat, aes(x = common_name, y = firstyes)) +
-     geom_boxplot(varwidth = TRUE) + 
+     geom_boxplot(fill = col) + 
+     stat_summary(fun.data = n_fun, geom = "text", hjust = 0.5,
+                  family = "sans", size = 3) +
      labs(title = paste0("First observation of ", phenogs2[i])) +
-     facet_grid(func_group~., scales = "free_y", space = "free") +
-     scale_y_continuous(breaks = doybreaks, labels = datebreaks) +
+     ggforce::facet_col(~func_group, scales = "free_y", space = "free") +
+     scale_y_continuous(limits = datelims, breaks = doybreaks, 
+                        labels = datebreaks) +
      coord_flip() +
-     theme(axis.title = element_blank())
+     theme_bw() +
+     theme(axis.title = element_blank(),
+           axis.text.x = element_text(size = 9), 
+           axis.text.y = element_text(size = 9),
+           strip.text = element_text(size = 9))
   )
   # Note: by using the varwidth argument, width of boxplots are proportional
   # to the square root of the number of observations
@@ -1184,12 +1200,6 @@ doybreaks <- doys[date1ind]
 datebreaks <- plotdates[date1ind] %>% format("%m/%d")
 datelims <- c(min(doys), max(doys) + 10)
 
-# Function to help add sample sizes to plot (95% of the way across date axis)
-n_fun <- function(x) {
-  return(data.frame(y = 0.99 * datelims[2],
-                    label = length(x)))
-}
-
 # Plot onset dates for each species, 4 at a time
 n_plots <- ceiling(length(spp) / 4)
 for (i in 1:n_plots) {
@@ -1202,13 +1212,13 @@ for (i in 1:n_plots) {
                         family = "sans", size = 3) +
            scale_y_continuous(limits = datelims, breaks = doybreaks, 
                               labels = datebreaks) +
-           # ylim(min(onsets_sub$firstyes), max(onsets_sub$firstyes)) +
            facet_wrap(~ common_name, ncol = 1) +
            scale_fill_manual(values = color_vec) +
            labs(x = "", y = "First day observed") +
            coord_flip() +
            theme_bw() +
            theme(legend.position = "none",
+                 axis.title = element_blank(),
                  axis.text.x = element_text(size = 9), 
                  axis.text.y = element_text(size = 9),
                  strip.text = element_text(size = 9))
@@ -1216,7 +1226,7 @@ for (i in 1:n_plots) {
   ggsave(paste0("output/onsets-plot-spp-", lpp_short, "-", i, ".png"),
          get(paste0("onsets_p", i)),
          width = onsets_plot_width,
-         height = 8,
+         height = 7.5,
          units = "in", 
          dpi = 600)
 }
@@ -1267,23 +1277,6 @@ onsett <- onsett %>%
 onsett <- onsett %>%
   filter(nyrs_minss >= min_yrs)
 
-# Add in functional group information
-onsett <- onsett %>%
-  left_join(select(species, common_name, functional_type), by = "common_name")
-onsett %>%
-  group_by(functional_type) %>%
-  summarize(n = n(),
-            n_spp = n_distinct(common_name)) %>%
-  data.frame()
-# Combining all forbs and grasses so there's more than one species per 
-# functional group
-onsett <- onsett %>%
-  mutate(func_group = case_when(
-    functional_type %in% c("Forb", "Graminoid", "Semi-evergreen forb") ~
-      "Forb or grass",
-    .default = functional_type
-  ))
-
 # Run analyses for each functional group
 onsett %>% select(func_group, phenogroup) %>% table() 
 onsett %>%
@@ -1306,10 +1299,11 @@ onsett %>%
 # Using ggeffects package to make and plot predictions
 # https://strengejacke.github.io/ggeffects/articles/introduction_randomeffects.html
 # With predict_response(), default is to produce 95% confidence intervals, but
-# can get prediction intervals with interval = "prediction". Predictions
-# for an average/typical species, site, individual; or, if using the type = 
-# "random" argument, get predictions for each level of specified random effect.
-# Can plot results directly, or convert to data.frame and then use ggplot()
+# could get prediction intervals with interval = "prediction". Function
+# generates predictions for an average/typical species, site, individual; or, if 
+# using the type = "random" argument, get predictions for each level of 
+# specified random effect.Can plot results directly, or convert to data.frame 
+# and then use ggplot()
 
 # Create nice labels for phenophase groups
 pl_pheno_classes <- pl_pheno_classes %>%
@@ -1460,7 +1454,6 @@ for (i in 1:nrow(func_groups_df)) {
   preds <- preds %>%
     left_join(pl_pheno_match, by = "phenogroup")
   
-
   # Create nice labels for dates on Y axes in plots
   plotdat <- filter(onsett, func_group == fgroup)
   mindoy <- min(plotdat$firstyes)
@@ -1470,31 +1463,65 @@ for (i in 1:nrow(func_groups_df)) {
   date1ind <- which(day(plotdates) == 1)
   doybreaks <- doys[date1ind]
   datebreaks <- plotdates[date1ind] %>% format("%m/%d")
+  datelims <- c(min(doys), max(doys))
+
+  # Create text for each panel (beta estimates and P-values)
+  doyrange <- max(doys) - min(doys)
+  label2_shift <- 0.065 * doyrange
+  ann_text <- data.frame(predicted1 = max(doys),
+                         predicted2 = max(doys) - label2_shift,
+                         yr = max(preds$yr),
+                         phenogroup = trends$phenogroup) %>%
+    
+    left_join(distinct(select(preds, phenogroup, phenogroup_f)), 
+              by = "phenogroup")
+  ann_text <- ann_text %>%
+    left_join(select(trends, phenogroup, beta, P), by = "phenogroup") %>%
+    mutate(beta2 = formatC(beta, digits = 2, format = "f"),
+           P2 = formatC(P, digits = 2, format = "f"),
+           Pstr = if_else(P2 == "0.00", " < 0.01", paste0(" = ", P2))) %>%
+    mutate(label1 = paste0("slope = ", beta2, " days/yr"),
+           label2 = paste0("P", Pstr))
 
   # Save ggplot object
   assign(paste0("trendsplot_", func_groups_df$func_group2[i]),
-  ggplot(data = filter(preds, spp != "mean"), aes(x = yr, y = predicted)) +
-    geom_line(aes(color = spp)) +
-    geom_ribbon(aes(ymin = conf.low, ymax = conf.high, fill = spp), 
-                alpha = 0.1) +
-    geom_point(data = plotdat,
-               aes(x = yr, y = firstyes, color = common_name),
-               position = position_dodge(width = 0.3),
-               size = 0.6, alpha = 0.4) +
-    geom_line(data = filter(preds, spp == "mean"),
-              aes(x = yr, y = predicted), linewidth = 1) +
-    # geom_ribbon(data = filter(preds, spp == "mean"), 
-    #             aes(x = yr, ymin = conf.low, ymax = conf.high), alpha = 0.2) +
-    facet_wrap(.~phenogroup_f) +
-    labs(y = "First observation date", fill = "Species", color = "Species") +
-    scale_y_continuous(breaks = doybreaks, labels = datebreaks) +
-    theme_bw() +
-    theme(axis.title.x = element_blank(),
-          panel.grid.major = element_blank(),
-          panel.grid.minor = element_blank(), 
-          legend.position = "bottom")
+         ggplot(data = filter(preds, spp != "mean"), aes(x = yr, y = predicted)) +
+           geom_line(aes(color = spp)) +
+           geom_ribbon(aes(ymin = conf.low, ymax = conf.high, fill = spp), 
+                       alpha = 0.1) +
+           geom_point(data = plotdat,
+                      aes(x = yr, y = firstyes, color = common_name),
+                      position = position_dodge(width = 0.3),
+                      size = 0.6, alpha = 0.4) +
+           geom_line(data = filter(preds, spp == "mean"),
+                     aes(x = yr, y = predicted), linewidth = 1) +
+           facet_wrap(.~phenogroup_f) +
+           geom_text(data = ann_text, 
+                     aes(y = predicted1, x = yr, label = label1, hjust = 1, vjust = 1,
+                         family = "sans"), size = 9/.pt) +
+           geom_text(data = ann_text, 
+                     aes(y = predicted2, x = yr, label = label2, hjust = 1, 
+                         vjust = 1, family = "sans"), size = 9/.pt) +
+           labs(y = "First observation date", fill = "Species", color = "Species") +
+           scale_y_continuous(breaks = doybreaks, labels = datebreaks,
+                              limits = datelims) +
+           theme_bw() +
+           theme(axis.title.x = element_blank(),
+                 panel.grid.major = element_blank(),
+                 panel.grid.minor = element_blank(), 
+                 legend.position = "bottom",
+                 axis.text.x = element_text(size = 9), 
+                 axis.text.y = element_text(size = 9),
+                 strip.text = element_text(size = 9))
   )
-
+  ggsave(paste0("output/trends-plot-", func_groups_df$func_group2[i], 
+                "-", lpp_short, ".png"),
+         get(paste0("trendsplot_", func_groups_df$func_group2[i])),
+         width = 6.5,
+         height = 6.5,
+         units = "in", 
+         dpi = 600)
+  
   assign(paste0("preds_", func_groups_df$func_group2[i]), preds)
   assign(paste0("trends_", func_groups_df$func_group2[i]), trends)
 }
@@ -1503,6 +1530,18 @@ for (i in 1:nrow(func_groups_df)) {
 # trendsplot_FUNC = ggplot object with a panel for each phenophase
 # preds_FUNC = table with trend predictions (and 95% CIs)
 # trends_FUNC = table with trend estimates
+
+
+fg_trends <- get(paste0("trends_", func_groups_df$func_group2[1]))
+for (i in 2:nrow(func_groups_df)) {
+  fg_trends <- rbind(fg_trends, 
+                     get(paste0("trends_", func_groups_df$func_group2[i])))
+}
+fg_trends <- fg_trends %>%
+  mutate(random_ints = str_remove_all(random_ints, "_id")) %>%
+  mutate(random_ints = str_replace_all(random_ints, "common_name", "species"))
+# write.table(fg_trends, "clipboard", sep = "\t", row.names = FALSE)
+
 
 #- Yet to work on... ----------------------------------------------------------#
 
