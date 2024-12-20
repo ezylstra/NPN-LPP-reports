@@ -1542,11 +1542,160 @@ fg_trends <- fg_trends %>%
   mutate(random_ints = str_replace_all(random_ints, "common_name", "species"))
 # write.table(fg_trends, "clipboard", sep = "\t", row.names = FALSE)
 
+#- Characterizing phenophase periods ------------------------------------------#
+# We're not always just interested in onsets....
 
-#- Yet to work on... ----------------------------------------------------------#
+df <- plg_status
 
-# Would be good to get an understanding of less "seasonal" species/regions for 
-# which we're less interested in initial onset, and more interested in when 
-# phenophases occur since that could happen over long period or multiple times
-# a year. 
+# Add week to the data so we can calculate weekly proportions
+# We'll also create wk_doy columns to assign each week with a day of the year:
+  # wk_doy1 = start of each week (eg, date for week 1 would be Jan 1)
+  # wk_doy4 = middle of each week (eg, date for week 1 would be Jan 4)
+df <- df %>%
+  # remove phenophase that is always NA
+  select(-status_fle) %>%
+  mutate(wk = week(obsdate)) %>%
+  # Remove observations in week 53
+  filter(wk < 53) %>%
+  # Create wk_doy columns
+  mutate(wk_date1 = parse_date_time(paste(2024, wk, 1, sep = "/"), "Y/W/w"),
+         wk_date1 =  as.Date(wk_date1),
+         wk_doy1 = yday(wk_date1),
+         wk_date4 = parse_date_time(paste(2024, wk, 4, sep = "/"), "Y/W/w"),
+         wk_date4 =  as.Date(wk_date4),
+         wk_doy4 = yday(wk_date4))
 
+# Keep just one observation of each plant and phenophase, each week. Sort so the 
+# most advanced phenophase gets kept (if more than one value in a week)
+df_lf <- df %>%
+  arrange(common_name, individual_id, yr, wk, desc(status_lf)) %>%
+  distinct(individual_id, yr, wk, .keep_all = TRUE) %>%
+  filter(!is.na(status_lf)) %>%
+  mutate(phenogroup = "lf") %>%
+  rename(status = status_lf) %>%
+  select(-contains("status_"))
+df_fl <- df %>%
+  arrange(common_name, individual_id, yr, wk, desc(status_fl)) %>%
+  distinct(individual_id, yr, wk, .keep_all = TRUE) %>%
+  filter(!is.na(status_fl)) %>%
+  mutate(phenogroup = "fl") %>%
+  rename(status = status_fl) %>%
+  select(-contains("status_"))
+df_flo <- df %>%
+  arrange(common_name, individual_id, yr, wk, desc(status_flo)) %>%
+  distinct(individual_id, yr, wk, .keep_all = TRUE) %>%
+  filter(!is.na(status_flo)) %>%
+  mutate(phenogroup = "flo") %>%
+  rename(status = status_flo) %>%
+  select(-contains("status_"))
+df_fr <- df %>%
+  arrange(common_name, individual_id, yr, wk, desc(status_fr)) %>%
+  distinct(individual_id, yr, wk, .keep_all = TRUE) %>%
+  filter(!is.na(status_fr)) %>%
+  mutate(phenogroup = "fr") %>%
+  rename(status = status_fr) %>%
+  select(-contains("status_"))
+df_frr <- df %>%
+  arrange(common_name, individual_id, yr, wk, desc(status_frr)) %>%
+  distinct(individual_id, yr, wk, .keep_all = TRUE) %>%
+  filter(!is.na(status_frr)) %>%
+  mutate(phenogroup = "frr") %>%
+  rename(status = status_frr) %>%
+  select(-contains("status_"))
+df_lfe <- df %>%
+  arrange(common_name, individual_id, yr, wk, desc(status_lfe)) %>%
+  distinct(individual_id, yr, wk, .keep_all = TRUE) %>%
+  filter(!is.na(status_lfe)) %>%
+  mutate(phenogroup = "lfe") %>%
+  rename(status = status_lfe) %>%
+  select(-contains("status_"))
+df <- bind_rows(df_lf, df_fl, df_flo, df_fr, df_frr, df_lfe)
+
+# Summarize data available across all plants, years, phenophases
+propdat_wk <- df %>%
+  group_by(common_name, phenogroup, wk) %>%
+  summarize(n_obs = n(), 
+            n_indiv = n_distinct(individual_id),
+            n_yrs = n_distinct(yr),
+            n_sites = n_distinct(site_id),
+            .groups = "keep") %>%
+  data.frame()
+propdat_wk_spp <- propdat_wk %>%
+  group_by(common_name, phenogroup) %>%
+  summarize(mn_obs_per_wk = round(mean(n_obs), 1),
+            max_n_yrs = max(n_yrs),
+            max_n_sites = max(n_sites),
+            .groups = "keep") %>%
+  data.frame()
+
+# Exclude any species, phenophase combinations where the mean number of
+# observations per week is < 10. 
+spp_ph_keep <- propdat_wk_spp %>%
+  filter(mn_obs_per_wk >= 10) %>%
+  mutate(spp_ph = paste0(common_name, "_", phenogroup))
+df <- df %>%
+  mutate(spp_ph = paste0(common_name, "_", phenogroup)) %>%
+  filter(spp_ph %in% spp_ph_keep$spp_ph)
+
+# Calculate weekly proportions of yeses for each species, phenophase
+wkprops <- df %>%
+  group_by(common_name, phenogroup, wk, wk_date1, wk_doy1, 
+           wk_date4, wk_doy4) %>%
+  summarize(n_obs = n(),
+            n_yes = sum(status),
+            .groups = "keep") %>%
+  data.frame() %>%
+  mutate(prop_yes = n_yes / n_obs)
+
+# To create figures with ticks between month labels on the x axis, need to do 
+# a little extra work. 
+  # Dates where we want month labels (15th of month)
+  x_lab <- as.Date(paste0("2024-", 1:12, "-15"))
+  # Dates where we want ticks (1st of month)
+  x_tick <- as.Date(c(paste0("2024-", 1:12, "-01"), "2025-01-01"))
+  n_x_tick <- length(x_tick)
+  # Will specify axis breaks & ticks at 1st and 15th of month. Make labels on
+  # the 1st black and change color of tick marks on the 15th to NA.
+
+# Not going to worry about year for now - lumping all years together
+# Could use a GAM to model weekly proportions (which would allow you to get 
+# predictions with CIs), but this is something we'll probably have to come back
+# to later. For now, plot raw data (smoothed via ggplot or otherwise)
+spp_list <- c("American beech")
+ph_list <- c("lf", "fl", "flo", "fr", "frr", "lfe")
+color_vec2 <- color_vec 
+names(color_vec2)[5:6] <- c("Fruit", "Ripe fruit")
+
+wkprops <- wkprops %>%
+  left_join(distinct(select(onsett, phenogroup, phenogroup_f)), 
+            by = "phenogroup")
+
+# for (i in 1:1) {
+i = 1  
+  cn <- spp_list[i]
+  props_sub <- wkprops %>%
+    filter(common_name == cn)
+
+  props_sub_lf <- props_sub %>% filter(phenogroup == "lf")
+
+# PICK UP HERE  
+
+  ggplot(data = props_sub_lf, 
+         aes(x = wk_date4, y = prop_yes, color = phenogroup_f)) +
+    geom_line() +
+    geom_point(aes(size = n_obs), alpha = 0.4) +
+    scale_color_manual(values = color_vec2) +
+    scale_x_continuous(limits = c(as.Date("2024-01-01"), as.Date("2024-12-31")),
+                       breaks = c(x_lab, x_tick),
+                       labels = c(month.abb, rep("", n_x_tick))) +
+    theme_bw() +
+    theme(axis.text.y = element_text(size = 9),
+          axis.ticks.x = element_line(color = c(rep(NA, n_x_tick - 1), 
+                                                rep("black", n_x_tick))),
+          panel.grid.minor.x = element_blank(),
+          panel.grid.major.x = element_line(color = c(rep(NA, n_x_tick - 1), 
+                                                      rep("white", n_x_tick))),
+          panel.background = element_rect(fill = "gray95"),
+          axis.title.x = element_blank())
+
+# }
