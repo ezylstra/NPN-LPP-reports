@@ -440,6 +440,23 @@ pl_pheno_classes <- pheno_list %>%
   arrange(class_id) %>%
   mutate(class_id2 = str_pad(class_id, width = 2, pad = 0))
 
+# Summary table for phenogroups:
+pgs_pl <- pheno_list %>%
+  filter(class_id %in% 1:13) %>%
+  group_by(pheno_group, class_id, class_name) %>%
+  summarize(n_phenophases = n(), .groups = "keep") %>%
+  data.frame() %>%
+  arrange(class_id)
+pgs_an <- pheno_list %>%
+  filter(!class_id %in% 1:13) %>%
+  group_by(pheno_group) %>%
+  summarize(n_classes = n_distinct(class_name),
+            n_phenophases = n()) %>%
+  data.frame()
+filter(pheno_list, pheno_group %in% c("Dead observation", "Trapped/baited"))
+write.table(pgs_pl, "clipboard", sep = "\t", row.names = FALSE)
+write.table(pgs_an, "clipboard", sep = "\t", row.names = FALSE)
+
 # Put in wide form
 plant_obs <- si_sub_plants %>%
   filter(phenophase_id != 206) %>%
