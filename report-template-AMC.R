@@ -1164,15 +1164,13 @@ for (i in 1:length(phenogs)) {
            axis.text.y = element_text(size = 9),
            strip.text = element_text(size = 9))
   )
-  # Note: by using the varwidth argument, width of boxplots are proportional
-  # to the square root of the number of observations
-  
-  ggsave(paste0("output/onsets-plot-", phenog, "-", lpp_short, ".png"),
-         get(paste0("onsets_plot_", phenog)),
-         width = onsets_plot_width,
-         height = onsets_plot_height,
-         units = "in", 
-         dpi = 600)
+
+  # ggsave(paste0("output/onsets-plot-", phenog, "-", lpp_short, ".png"),
+  #        get(paste0("onsets_plot_", phenog)),
+  #        width = onsets_plot_width,
+  #        height = onsets_plot_height,
+  #        units = "in", 
+  #        dpi = 600)
   
 }
 # Saved a ggplot object for each phenogroup: onsets_plot_PG
@@ -1223,12 +1221,12 @@ for (i in 1:n_plots) {
                  axis.text.y = element_text(size = 9),
                  strip.text = element_text(size = 9))
          )
-  ggsave(paste0("output/onsets-plot-spp-", lpp_short, "-", i, ".png"),
-         get(paste0("onsets_p", i)),
-         width = onsets_plot_width,
-         height = 7.5,
-         units = "in", 
-         dpi = 600)
+  # ggsave(paste0("output/onsets-plot-spp-", lpp_short, "-", i, ".png"),
+  #        get(paste0("onsets_p", i)),
+  #        width = onsets_plot_width,
+  #        height = 7.5,
+  #        units = "in", 
+  #        dpi = 600)
 }
 # for (i in 1:n_plots) {
 #   print(get(paste0("onsets_p",i)))
@@ -1514,13 +1512,13 @@ for (i in 1:nrow(func_groups_df)) {
                  axis.text.y = element_text(size = 9),
                  strip.text = element_text(size = 9))
   )
-  ggsave(paste0("output/trends-plot-", func_groups_df$func_group2[i], 
-                "-", lpp_short, ".png"),
-         get(paste0("trendsplot_", func_groups_df$func_group2[i])),
-         width = 6.5,
-         height = 6.5,
-         units = "in", 
-         dpi = 600)
+  # ggsave(paste0("output/trends-plot-", func_groups_df$func_group2[i], 
+  #               "-", lpp_short, ".png"),
+  #        get(paste0("trendsplot_", func_groups_df$func_group2[i])),
+  #        width = 6.5,
+  #        height = 6.5,
+  #        units = "in", 
+  #        dpi = 600)
   
   assign(paste0("preds_", func_groups_df$func_group2[i]), preds)
   assign(paste0("trends_", func_groups_df$func_group2[i]), trends)
@@ -1530,7 +1528,6 @@ for (i in 1:nrow(func_groups_df)) {
 # trendsplot_FUNC = ggplot object with a panel for each phenophase
 # preds_FUNC = table with trend predictions (and 95% CIs)
 # trends_FUNC = table with trend estimates
-
 
 fg_trends <- get(paste0("trends_", func_groups_df$func_group2[1]))
 for (i in 2:nrow(func_groups_df)) {
@@ -1629,7 +1626,7 @@ propdat_wk_spp <- propdat_wk %>%
   data.frame()
 
 # Exclude any species, phenophase combinations where the mean number of
-# observations per week is < 10. 
+# observations per week is < 10
 spp_ph_keep <- propdat_wk_spp %>%
   filter(mn_obs_per_wk >= 10) %>%
   mutate(spp_ph = paste0(common_name, "_", phenogroup))
@@ -1645,57 +1642,124 @@ wkprops <- df %>%
             n_yes = sum(status),
             .groups = "keep") %>%
   data.frame() %>%
-  mutate(prop_yes = n_yes / n_obs)
+  mutate(prop_yes = n_yes / n_obs) %>%
+  left_join(distinct(select(onsett, phenogroup, phenogroup_f)), 
+            by = "phenogroup")
+
+# Remove any weekly proportions that are based on < 5 observations (over 
+# all years, individuals)
+wkprops <- wkprops %>%
+  filter(n_obs >= 5)
+
+# Not going to worry about year for now - lumping all years together
+# Could use a GAM to model weekly proportions and have the ends of the year
+# match up (and get predictions with CIs), but this is something we'll probably 
+# have to come back. For now will plot raw data (with smoothed spline)
 
 # To create figures with ticks between month labels on the x axis, need to do 
 # a little extra work. 
   # Dates where we want month labels (15th of month)
   x_lab <- as.Date(paste0("2024-", 1:12, "-15"))
   # Dates where we want ticks (1st of month)
-  x_tick <- as.Date(c(paste0("2024-", 1:12, "-01"), "2025-01-01"))
-  n_x_tick <- length(x_tick)
+  x_tick <- as.Date(c(paste0("2024-", 1:12, "-01"), "2024-12-31"))
   # Will specify axis breaks & ticks at 1st and 15th of month. Make labels on
   # the 1st black and change color of tick marks on the 15th to NA.
 
-# Not going to worry about year for now - lumping all years together
-# Could use a GAM to model weekly proportions (which would allow you to get 
-# predictions with CIs), but this is something we'll probably have to come back
-# to later. For now, plot raw data (smoothed via ggplot or otherwise)
-spp_list <- c("American beech")
-ph_list <- c("lf", "fl", "flo", "fr", "frr", "lfe")
-color_vec2 <- color_vec 
-names(color_vec2)[5:6] <- c("Fruit", "Ripe fruit")
+  # Subset if LPP only monitored over part of the year
+  lpp_month1 <- month(min(wkprops$wk_date4))
+  lpp_month2 <- month(max(wkprops$wk_date4))
+  x_lab <- x_lab[month(x_lab) %in% lpp_month1:lpp_month2]
+  tickind <- which(month(x_tick) %in% lpp_month1:lpp_month2)
+  if (last(tickind) != 13) {
+    tickind <- c(tickind, 1 + last(tickind))
+  }
+  x_tick <- x_tick[tickind]
 
-wkprops <- wkprops %>%
-  left_join(distinct(select(onsett, phenogroup, phenogroup_f)), 
-            by = "phenogroup")
+  x_lab_doy <- yday(x_lab)
+  x_tick_doy <- yday(x_tick)
+  n_x_tick <- length(x_tick)
+  month_labels <- month.abb[month(x_lab)]
+  
+  color_vec2 <- color_vec 
+  names(color_vec2)[5:6] <- c("Fruit", "Ripe fruit")
 
-# for (i in 1:1) {
-i = 1  
-  cn <- spp_list[i]
-  props_sub <- wkprops %>%
-    filter(common_name == cn)
+spp_list <- sort(unique(wkprops$common_name))
 
-  props_sub_lf <- props_sub %>% filter(phenogroup == "lf")
+# 4 species in each multi-panel plot
+n_plots <- ceiling(length(spp_list) / 4)
+for (i in 1:n_plots) {
+  spps <- spp_list[(i * 4 - 3):(i * 4)]
+  props4 <- filter(wkprops, common_name %in% spps)
+  
+  # Get smoothed spline for each species, phenophase
+  for (k in 1:4) {
+    props <- filter(props4, common_name == spps[k])
+    pg_list <- unique(props$phenogroup)
+    
+    for (j in pg_list) {
+      
+      props_pg <- props %>% filter(phenogroup == j)
+      pg_preds <- data.frame(spline(x = props_pg$wk_doy4, 
+                                    y = props_pg$prop_yes,
+                                    n = 1000)) %>%
+        mutate(y01 = if_else(y < 0, 0, y)) %>%
+        mutate(y01 = if_else(y01 > 1, 1, y01)) %>%
+        mutate(common_name = spps[k]) %>%
+        mutate(phenogroup_f = props_pg$phenogroup_f[1])
+      
+      if (j == pg_list[1]) {
+        pg_preds_all <- pg_preds
+      } else {
+        pg_preds_all <- rbind(pg_preds_all, pg_preds)
+      }
+    }
+    if (k == 1) {
+      pg_preds4 <- pg_preds_all
+    } else {
+      pg_preds4 <- rbind(pg_preds4, pg_preds_all)
+    }
+  }
 
-# PICK UP HERE  
-
-  ggplot(data = props_sub_lf, 
-         aes(x = wk_date4, y = prop_yes, color = phenogroup_f)) +
-    geom_line() +
-    geom_point(aes(size = n_obs), alpha = 0.4) +
+  assign(paste0("phenophase_periods_p", i),
+  ggplot() +
+    geom_point(data = props4,
+               aes(x = wk_doy4, y = prop_yes,
+                   size = n_obs, color = phenogroup_f), alpha = 0.2) +
+    scale_size_continuous(range = c(0.5, 4)) +
+    geom_line(data = pg_preds4, 
+              aes(x = x, y = y01, color = phenogroup_f)) +
     scale_color_manual(values = color_vec2) +
-    scale_x_continuous(limits = c(as.Date("2024-01-01"), as.Date("2024-12-31")),
-                       breaks = c(x_lab, x_tick),
-                       labels = c(month.abb, rep("", n_x_tick))) +
+    scale_x_continuous(limits = c(min(x_tick_doy), max(x_tick_doy)),
+                       # expand = c(0, 0),
+                       breaks = c(x_lab_doy, x_tick_doy),
+                       labels = c(month_labels, rep("", n_x_tick))) +
+    scale_y_continuous(expand = c(0.04, 0.04), 
+                       breaks = seq(0, 1, by = 0.2)) +
+    facet_wrap(~ common_name, ncol = 1) +
+    labs(y = "Proportion of observations in phenophase", 
+         color = "", size = "No. observations") +
     theme_bw() +
-    theme(axis.text.y = element_text(size = 9),
-          axis.ticks.x = element_line(color = c(rep(NA, n_x_tick - 1), 
+    theme(axis.ticks.x = element_line(color = c(rep(NA, n_x_tick - 1), 
                                                 rep("black", n_x_tick))),
-          panel.grid.minor.x = element_blank(),
-          panel.grid.major.x = element_line(color = c(rep(NA, n_x_tick - 1), 
-                                                      rep("white", n_x_tick))),
-          panel.background = element_rect(fill = "gray95"),
-          axis.title.x = element_blank())
-
-# }
+          panel.grid.major = element_line(color = "gray95"),
+          panel.grid.minor = element_blank(), 
+          legend.position = "bottom",
+          legend.box = "vertical", 
+          legend.margin = margin(),
+          axis.text.x = element_text(size = 9), 
+          axis.text.y = element_text(size = 9),
+          legend.title = element_text(size = 9),
+          axis.title.x = element_blank()) +
+    guides(color = guide_legend(nrow = 1, byrow = TRUE))
+  )
+  # ggsave(paste0("output/phenophase-periods-spp-", lpp_short, "-", i, ".png"),
+  #        get(paste0("phenophase_periods_p", i)),
+  #        width = 6.5,
+  #        height = 7.5,
+  #        units = "in",
+  #        dpi = 600)
+}
+# for (i in 1:n_plots) {
+#   print(paste0("phenophase_periods_p", i))
+# }  
+  
