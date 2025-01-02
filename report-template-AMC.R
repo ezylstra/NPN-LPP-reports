@@ -95,6 +95,7 @@ si <- si %>% distinct(across(-observation_id))
 pheno_list <- read.csv("phenophases.csv")
 si <- left_join(si, select(pheno_list, phenophase_id, class_id, pheno_group),
                 by = "phenophase_id")
+# NOTE: for reports, may refer to "leaf senescence" as "colored leaves"
 
 # Append intensity single values (csv created in phenophase-intensities.R)
 intensity_list <- read.csv("intensities.csv")
@@ -441,6 +442,10 @@ pl_pheno_classes <- pheno_list %>%
   mutate(class_id2 = str_pad(class_id, width = 2, pad = 0))
 
 # Summary table for phenogroups:
+pheno_list <- pheno_list %>%
+  mutate(pheno_group = replace(pheno_group, 
+                               pheno_group == "Leaf senescence", 
+                               "Colored leaves"))
 pgs_pl <- pheno_list %>%
   filter(class_id %in% 1:13) %>%
   group_by(pheno_group, class_id, class_name) %>%
@@ -453,9 +458,8 @@ pgs_an <- pheno_list %>%
   summarize(n_classes = n_distinct(class_name),
             n_phenophases = n()) %>%
   data.frame()
-filter(pheno_list, pheno_group %in% c("Dead observation", "Trapped/baited"))
-write.table(pgs_pl, "clipboard", sep = "\t", row.names = FALSE)
-write.table(pgs_an, "clipboard", sep = "\t", row.names = FALSE)
+# write.table(pgs_pl, "clipboard", sep = "\t", row.names = FALSE)
+# write.table(pgs_an, "clipboard", sep = "\t", row.names = FALSE)
 
 # Put in wide form
 plant_obs <- si_sub_plants %>%
@@ -660,7 +664,8 @@ sitest <- sitest %>%
   mutate(across(n_animal_obs:n_plant_obs,  ~ replace_na(.x, 0))) %>%
   mutate(obs_total = n_animal_obs + n_plant_obs) %>%
   rename(obs_animal = n_animal_obs,
-         obs_plant = n_plant_obs)
+         obs_plant = n_plant_obs) %>%
+  arrange(desc(years), desc(obs_total))				 
 #TODO: Decide whether we want filters for number of years (>= 3?), number
 # of observations (> 100?), or number of species?
 
@@ -768,7 +773,22 @@ freqs <- rbind(freqs_pl, freqs_an) %>%
   rename(nobs_mn_per_yrind = nobs_mn,
          interval_mn_per_yrind = interval_mn)
 species2 <- species2 %>%
-  left_join(freqs, by = "common_name")
+  left_join(freqs, by = "common_name") %>%
+  mutate(functional_type = factor(functional_type, 
+                                  levels = c("Deciduous broadleaf",
+                                             "Evergreen broadleaf",
+                                             "Evergreen conifer",
+                                             "Pine",
+                                             "Evergreen forb",
+                                             "Forb",
+                                             "Semi-evergreen forb",
+                                             "Graminoid",
+                                             "Amphibian",
+                                             "Bird",
+                                             "Insect", 
+                                             "Mammal",
+                                             "Reptile"))) %>%
+  arrange(desc(kingdom), functional_type, common_name)
 
 # write.table(species2, "clipboard", sep = "\t", row.names = FALSE)
 
@@ -1072,7 +1092,7 @@ onset_ss %>%
 onsets <- onsets %>%
   mutate(group_labels = case_when(
     phenogroup == "lf" ~ "Leaves",
-    phenogroup == "lfe" ~ "Leaf senescence",
+    phenogroup == "lfe" ~ "Colored leaves",
     phenogroup == "fl" ~ "Flowers",
     phenogroup == "flo" ~ "Open flowers",
     phenogroup == "fle" ~ "Flower senescence",
@@ -1080,7 +1100,7 @@ onsets <- onsets %>%
     phenogroup == "frr" ~ "Ripe fruits"
   )) %>%
   mutate(group_labels = factor(group_labels,
-                               levels = c("Leaf senescence",
+                               levels = c("Colored leaves",
                                           "Ripe fruits",
                                           "Fruits",
                                           "Flower senescence",
@@ -1095,7 +1115,7 @@ color_vec <- c("#b2df8a",   # Leaves
                "#b2beb5",   # Flower senescence
                "#cab2d6",   # Fruits
                "#6a3d9a",   # Ripe fruits
-               "#8c510a")   # Leaf senescence
+               "#8c510a")   # Colored leaves
 # Name vector so colors are consistent across figures (in case not all levels 
 # are present in all figures)
 names(color_vec) <- rev(levels(onsets$group_labels))
@@ -1115,6 +1135,9 @@ onsets %>%
   summarize(n = n(),
             n_spp = n_distinct(common_name)) %>%
   data.frame()
+onsets <- onsets %>%
+  mutate(common_name_full = paste0(common_name, " (", 
+                                   str_to_lower(functional_type), ")"))
 # Combining all forbs and grasses so there's more than one species per 
 # functional group
 onsets <- onsets %>%
@@ -1124,6 +1147,8 @@ onsets <- onsets %>%
       "Forb or grass",
     .default = functional_type
   ))
+onsets <- onsets %>%
+  arrange(func_group, functional_type, common_name)
 
 # Set minimum number of observations per species-phenogroup to summarize onset 
 # dates
@@ -1134,7 +1159,7 @@ min_obs <- 15
 
 phenogs <- c("lf", "fl", "flo", "fr", "frr", "lfe")
 phenogs2 <- c("leaves", "flowers", "open flowers", "fruits", "ripe fruits",
-              "leaf senescence")
+              "colored leaves")
 onsets_plot_width <- 6.5
 onsets_plot_heightmax <- 6.5
 total_nspp <- n_distinct(onsets$common_name[onsets$n_obs_sppgroup >= min_obs])
@@ -1172,7 +1197,7 @@ for (i in 1:length(phenogs)) {
                   family = "sans", size = 3) +
      labs(title = paste0("First observation of ", phenogs2[i])) +
      ggforce::facet_col(~func_group, scales = "free_y", space = "free") +
-     scale_y_continuous(limits = datelims, breaks = doybreaks, 
+     scale_y_continuous(limits = datelims, breaks = doybreaks,
                         labels = datebreaks) +
      coord_flip() +
      theme_bw() +
@@ -1186,7 +1211,7 @@ for (i in 1:length(phenogs)) {
   #        get(paste0("onsets_plot_", phenog)),
   #        width = onsets_plot_width,
   #        height = onsets_plot_height,
-  #        units = "in", 
+  #        units = "in",
   #        dpi = 600)
   
 }
@@ -1203,7 +1228,7 @@ onsets_sub <- onsets %>%
   data.frame() %>%
   filter(n_phenogroups > 2)
   
-spp <- sort(unique(onsets_sub$common_name))
+spp <- unique(onsets_sub$common_name_full)
 
 # Create nice labels for dates on X axes in plots
 mindoy <- min(onsets_sub$firstyes)
@@ -1219,15 +1244,16 @@ datelims <- c(min(doys), max(doys) + 10)
 n_plots <- ceiling(length(spp) / 4)
 for (i in 1:n_plots) {
   spps <- spp[(i * 4 - 3):(i * 4)]
+  plotdat <- filter(onsets_sub, common_name_full %in% spps)
   assign(paste0("onsets_p", i),
-         ggplot(data = filter(onsets_sub, common_name %in% spps),
+         ggplot(data = plotdat,
                 aes(x = group_labels, y = firstyes, fill = group_labels)) +
            geom_boxplot() +
            stat_summary(fun.data = n_fun, geom = "text", hjust = 0.5, 
                         family = "sans", size = 3) +
            scale_y_continuous(limits = datelims, breaks = doybreaks, 
                               labels = datebreaks) +
-           facet_wrap(~ common_name, ncol = 1) +
+           facet_wrap(~ factor(common_name_full, levels = spps), ncol = 1) +
            scale_fill_manual(values = color_vec) +
            labs(x = "", y = "First day observed") +
            coord_flip() +
@@ -1242,12 +1268,9 @@ for (i in 1:n_plots) {
   #        get(paste0("onsets_p", i)),
   #        width = onsets_plot_width,
   #        height = 7.5,
-  #        units = "in", 
+  #        units = "in",
   #        dpi = 600)
 }
-# for (i in 1:n_plots) {
-#   print(get(paste0("onsets_p",i)))
-# }
 
 #- Trends in onset dates ------------------------------------------------------#
 
@@ -1324,7 +1347,7 @@ onsett %>%
 pl_pheno_classes <- pl_pheno_classes %>%
   mutate(phenogroup = case_when(
     group_code == "lf" ~ "Leaves",
-    group_code == "lfe" ~ "Leaf senescence",
+    group_code == "lfe" ~ "Colored leaves",
     group_code == "fl" ~ "Flowers",
     group_code == "flo" ~ "Open flowers",
     group_code == "fle" ~ "Flower senescence",
@@ -1342,7 +1365,7 @@ pl_pheno_match <- pl_pheno_classes %>%
                                           "Flower senescence",
                                           "Fruit",
                                           "Ripe fruit",
-                                          "Leaf senescence"))) %>%
+                                          "Colored leaves"))) %>%
   distinct()
 onsett <- onsett %>%
   left_join(pl_pheno_match, by = "phenogroup")
@@ -1477,19 +1500,24 @@ for (i in 1:nrow(func_groups_df)) {
   plotdates <- as.Date(paste(2023, doys, sep = "-"), "%Y-%j")
   date1ind <- which(day(plotdates) == 1)
   doybreaks <- doys[date1ind]
-  datebreaks <- plotdates[date1ind] %>% format("%m/%d")
-  datelims <- c(min(doys), max(doys))
+  datebreaks <- str_glue("{month(plotdates[date1ind])}/{day(plotdates[date1ind])}") %>%
+    as.character()
 
   # Create text for each panel (beta estimates and P-values)
-  doyrange <- max(doys) - min(doys)
-  label2_shift <- 0.065 * doyrange
-  ann_text <- data.frame(predicted1 = max(doys),
-                         predicted2 = max(doys) - label2_shift,
-                         yr = max(preds$yr),
+  plotdat_summary <- plotdat %>%
+    group_by(phenogroup) %>%
+    summarize(mindoy = min(firstyes),
+              maxdoy = max(firstyes)) %>%
+    data.frame() %>%
+    mutate(rangedoy = maxdoy - mindoy,
+           label1y = maxdoy,
+           label2y = label1y - (0.065 * rangedoy)) %>%
+    select(-c(mindoy, maxdoy, rangedoy))
+  ann_text <- data.frame(yr = max(preds$yr),
                          phenogroup = trends$phenogroup) %>%
-    
     left_join(distinct(select(preds, phenogroup, phenogroup_f)), 
-              by = "phenogroup")
+              by = "phenogroup") %>%
+    left_join(plotdat_summary, by = "phenogroup")
   ann_text <- ann_text %>%
     left_join(select(trends, phenogroup, beta, P), by = "phenogroup") %>%
     mutate(beta2 = formatC(beta, digits = 2, format = "f"),
@@ -1497,44 +1525,49 @@ for (i in 1:nrow(func_groups_df)) {
            Pstr = if_else(P2 == "0.00", " < 0.01", paste0(" = ", P2))) %>%
     mutate(label1 = paste0("slope = ", beta2, " days/yr"),
            label2 = paste0("P", Pstr))
-
+  
+  text_size <- 8
+  ci_alpha <- 0.17
+  
   # Save ggplot object
   assign(paste0("trendsplot_", func_groups_df$func_group2[i]),
          ggplot(data = filter(preds, spp != "mean"), aes(x = yr, y = predicted)) +
            geom_line(aes(color = spp)) +
            geom_ribbon(aes(ymin = conf.low, ymax = conf.high, fill = spp), 
-                       alpha = 0.1) +
+                       alpha = ci_alpha) +
            geom_point(data = plotdat,
                       aes(x = yr, y = firstyes, color = common_name),
                       position = position_dodge(width = 0.3),
                       size = 0.6, alpha = 0.4) +
            geom_line(data = filter(preds, spp == "mean"),
                      aes(x = yr, y = predicted), linewidth = 1) +
-           facet_wrap(.~phenogroup_f) +
-           geom_text(data = ann_text, 
-                     aes(y = predicted1, x = yr, label = label1, hjust = 1, vjust = 1,
-                         family = "sans"), size = 9/.pt) +
-           geom_text(data = ann_text, 
-                     aes(y = predicted2, x = yr, label = label2, hjust = 1, 
-                         vjust = 1, family = "sans"), size = 9/.pt) +
-           labs(y = "First observation date", fill = "Species", color = "Species") +
-           scale_y_continuous(breaks = doybreaks, labels = datebreaks,
-                              limits = datelims) +
+           facet_wrap(.~phenogroup_f, scales = "free_y") +
+           geom_text(data = ann_text,
+                     aes(y = label1y, x = yr, label = label1, hjust = 1, vjust = 1,
+                         family = "sans"), size = text_size/.pt) +
+           geom_text(data = ann_text,
+                     aes(y = label2y, x = yr, label = label2, hjust = 1,
+                         vjust = 1, family = "sans"), size = text_size/.pt) +
+           labs(y = "First observation date", fill = "", color = "") +
+           scale_y_continuous(breaks = doybreaks, labels = datebreaks) +
            theme_bw() +
            theme(axis.title.x = element_blank(),
                  panel.grid.major = element_blank(),
                  panel.grid.minor = element_blank(), 
                  legend.position = "bottom",
-                 axis.text.x = element_text(size = 9), 
-                 axis.text.y = element_text(size = 9),
-                 strip.text = element_text(size = 9))
+                 axis.text.x = element_text(size = text_size), 
+                 axis.text.y = element_text(size = text_size),
+                 strip.text = element_text(size = text_size),
+                 axis.title.y = element_text(size = text_size + 1),
+                 legend.title = element_text(size = text_size),
+                 legend.text = element_text(size = text_size))
   )
-  # ggsave(paste0("output/trends-plot-", func_groups_df$func_group2[i], 
+  # ggsave(paste0("output/trends-plot-", func_groups_df$func_group2[i],
   #               "-", lpp_short, ".png"),
   #        get(paste0("trendsplot_", func_groups_df$func_group2[i])),
   #        width = 6.5,
   #        height = 6.5,
-  #        units = "in", 
+  #        units = "in",
   #        dpi = 600)
   
   assign(paste0("preds_", func_groups_df$func_group2[i]), preds)
@@ -1699,18 +1732,46 @@ wkprops <- wkprops %>%
   
   color_vec2 <- color_vec 
   names(color_vec2)[5:6] <- c("Fruit", "Ripe fruit")
+  # Make green for leaves a little darker in color
+  rgb2col = function(rgbmat){
+    ProcessColumn = function(col){
+      rgb(rgbmat[1, col], 
+          rgbmat[2, col], 
+          rgbmat[3, col], 
+          maxColorValue = 255)
+    }
+    sapply(1:ncol(rgbmat), ProcessColumn)
+  }
+  darker_gr <- rgb2col(round(col2rgb(color_vec2["Leaves"]) * 0.8))
+  color_vec2["Leaves"] <- darker_gr
+  
+wkprops <- wkprops %>% 
+  left_join(select(species, common_name, functional_type), 
+            by = "common_name") %>%
+  mutate(func_group = case_when(
+    functional_type %in% c("Forb", "Graminoid", 
+                           "Semi-evergreen forb", "Evergreen forb") ~
+      "Forb or grass",
+    .default = functional_type
+  )) %>%
+  mutate(common_name_full = paste0(common_name, " (", 
+                                   str_to_lower(functional_type), ")")) %>%
+  arrange(func_group, functional_type, common_name)
 
-spp_list <- sort(unique(wkprops$common_name))
+spp_list <- unique(wkprops$common_name_full)
 
 # 4 species in each multi-panel plot
 n_plots <- ceiling(length(spp_list) / 4)
+
+pt_alpha <- 0.3
+
 for (i in 1:n_plots) {
   spps <- spp_list[(i * 4 - 3):(i * 4)]
-  props4 <- filter(wkprops, common_name %in% spps)
+  props4 <- filter(wkprops, common_name_full %in% spps)
   
   # Get smoothed spline for each species, phenophase
   for (k in 1:4) {
-    props <- filter(props4, common_name == spps[k])
+    props <- filter(props4, common_name_full == spps[k])
     pg_list <- unique(props$phenogroup)
     
     for (j in pg_list) {
@@ -1721,7 +1782,7 @@ for (i in 1:n_plots) {
                                     n = 1000)) %>%
         mutate(y01 = if_else(y < 0, 0, y)) %>%
         mutate(y01 = if_else(y01 > 1, 1, y01)) %>%
-        mutate(common_name = spps[k]) %>%
+        mutate(common_name_full = spps[k]) %>%
         mutate(phenogroup_f = props_pg$phenogroup_f[1])
       
       if (j == pg_list[1]) {
@@ -1741,7 +1802,7 @@ for (i in 1:n_plots) {
   ggplot() +
     geom_point(data = props4,
                aes(x = wk_doy4, y = prop_yes,
-                   size = n_obs, color = phenogroup_f), alpha = 0.2) +
+                   size = n_obs, color = phenogroup_f), alpha = pt_alpha) +
     scale_size_continuous(range = c(0.5, 4)) +
     geom_line(data = pg_preds4, 
               aes(x = x, y = y01, color = phenogroup_f)) +
@@ -1752,7 +1813,7 @@ for (i in 1:n_plots) {
                        labels = c(month_labels, rep("", n_x_tick))) +
     scale_y_continuous(expand = c(0.04, 0.04), 
                        breaks = seq(0, 1, by = 0.2)) +
-    facet_wrap(~ common_name, ncol = 1) +
+    facet_wrap(~ factor(common_name_full, levels = spps), ncol = 1) +
     labs(y = "Proportion of observations in phenophase", 
          color = "", size = "No. observations") +
     theme_bw() +
@@ -1776,7 +1837,5 @@ for (i in 1:n_plots) {
   #        units = "in",
   #        dpi = 600)
 }
-# for (i in 1:n_plots) {
-#   print(paste0("phenophase_periods_p", i))
-# }  
+
   
