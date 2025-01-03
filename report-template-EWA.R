@@ -872,3 +872,453 @@ species4 <- species2 %>%
 # close proximity)
 
 # For now, see start in site-maps.R
+
+#- Download and process climate data ------------------------------------------#
+
+# Download in download-daymet.R
+
+# Load climate data
+daymet_csv <- paste0("climate-data/daymet-", lpp_short,  
+                     "-thru", max(all_yrs), ".csv")
+daymet_zip <- str_replace(daymet_csv, ".csv", ".zip")
+unzip(daymet_zip)
+clim_full <- read.csv(daymet_csv)
+file.remove(daymet_csv)
+
+# Summarize data for each season (as defined previously by NPN)
+# Spring = Mar-May
+# Summer = Jun-Aug
+# Fall = Sep-Nov
+# Winter = Dec-Feb (assigned to year for Jan-Feb)
+
+# Just summarize for temperature, precipitation
+clims <- clim_full %>%
+  select(-c(daylength_s, rad_Wm2, vp_Pa, swe_kgm2))
+
+# Assign "seasonyr" (so Dec is associated with Jan, Feb in next calendar year)
+clims <- clims %>%
+  mutate(date = ymd(date)) %>%
+  mutate(seasonyr = if_else(mon == 12, year + 1, year))
+
+# Remove winter seasons where we don't have data from all months and add a 
+# season label
+clims <- clims %>%
+  # Remove data from Jan-Feb in first year with climate data
+  filter(!(seasonyr == min(seasonyr) & mon %in% 1:2)) %>%
+  # Remove data from Dec in last year with climate data
+  filter(seasonyr != max(seasonyr)) %>%
+  # Season labels
+  mutate(season = case_when(
+    mon %in% 3:5 ~ "spring",
+    mon %in% 6:8 ~ "summer",
+    mon %in% 9:11 ~ "fall",
+    .default = "winter"
+  )) %>%
+  mutate(season = factor(season, 
+                         levels = c("winter", "spring", "summer", "fall")))
+
+# Calculate mean daily temperatures
+clims <- clims %>%
+  mutate(tmean_c = round((tmax_c + tmin_c) / 2, 2))
+
+# Summarize data by season (accumulated precip, mean tmin, tmean, tmax)
+clims <- clims %>%
+  group_by(site, seasonyr, season) %>%
+  summarize(prcp = sum(prcp_mm),
+            tmin = mean(tmin_c),
+            tmean = mean(tmean_c),
+            tmax = mean(tmax_c),
+            .groups = "keep") %>%
+  data.frame()
+
+#- Aggregate status information within phenophase group -----------------------#
+
+# Aggregate status information within pheno group (doesn't make sense to 
+# aggregate intensity values, since they may not always be the same type)
+
+# For now, will use 7 phenophase groups for plants
+
+# Create new data frame without intensity data and other data summaries
+plg_status <- plant_obs2 %>% 
+  select(-c(contains("intens"), "n_status", "n_yes", "n_observations"))
+
+# Aggregate information across classes within each pheno group
+# TODO: make this easier by putting things into long form first?
+for (group in unique(pl_pheno_classes$group_code)) {
+  cols <- pl_pheno_classes$stat_cols_c[pl_pheno_classes$group_code == group]
+  plg_status[,paste0("sum_", group)] <- apply(as.matrix(plg_status[,cols]), 
+                                              1, na_max)
+}
+# Remove columns associated with classes and rename columns with status data
+plg_status <- plg_status %>% select(-contains("status_"))
+colnames(plg_status) <- str_replace(colnames(plg_status), "sum", "status")
+
+#- Decide on calendar vs water year -------------------------------------------#
+
+# Identify whether we want to evaluate onset dates within a calendar year
+# or within a water year (1 Oct - 30 Sep)
+water_year <- FALSE
+
+# if we're using water year, create new yr and doy columns
+plg_status <- plg_status %>% rename(doy = day_of_year)
+if (water_year) {
+  plg_status <- plg_status %>%
+    mutate(mon = month(obsdate)) %>%
+    mutate(wateryr = if_else(mon %in% 10:12, yr + 1, yr)) %>%
+    mutate(wateryrday0 = make_date(year = wateryr - 1, month = 9, day = 30)) %>%
+    mutate(doy = as.numeric(obsdate - wateryrday0)) %>%
+    select(-c(mon, wateryrday0, yr)) %>%
+    rename(yr = wateryr)
+}
+
+#- Calculate/extract onset dates ----------------------------------------------#
+
+# For now, just using the first "yes" of the year (or water year).
+
+# Create a unique ID for each plant-year to make various matches easier
+plg_status <- plg_status %>%
+  mutate(plantyr = paste0(individual_id, "_", yr))
+
+# Create a new dataframe summarizing data available for each plant-year
+py <- plg_status %>%
+  group_by(plantyr, individual_id, yr, common_name, site_id) %>%
+  summarize(n_obs = n(),
+            first_obs = min(doy),
+            last_obs = max(doy),
+            n_status_lf = sum(!is.na(status_lf)),
+            n_status_lfe = sum(!is.na(status_lfe)),
+            n_status_fl = sum(!is.na(status_fl)),
+            n_status_flo = sum(!is.na(status_flo)),
+            n_status_fle = sum(!is.na(status_fle)),
+            n_status_fr = sum(!is.na(status_fr)),
+            n_status_frr = sum(!is.na(status_frr)),
+            n_lf_yes = sum(!is.na(status_lf) & status_lf == 1),
+            n_lfe_yes = sum(!is.na(status_lfe) & status_lfe == 1),
+            n_fl_yes = sum(!is.na(status_fl) & status_fl == 1),
+            n_flo_yes = sum(!is.na(status_flo) & status_flo == 1),
+            n_fle_yes = sum(!is.na(status_fle) & status_fle == 1),
+            n_fr_yes = sum(!is.na(status_fr) & status_fr == 1),
+            n_frr_yes = sum(!is.na(status_frr) & status_frr == 1),
+            .groups = "keep") %>%
+  data.frame()
+
+# Remove years when plant was observed only once
+py <- py %>%
+  filter(n_obs > 1)
+
+# Add columns for onset info (for all pheno groups, even if there was never any
+# status information collected?)
+# *_firstyes = DOY with first "yes" response
+# *-lastno = number of days between prior "no" response and first "yes" response 
+# (will be NA if no prior "no")
+py$lf_firstyes <- NA
+py$lf_lastno <- NA
+py$lfe_firstyes <- NA
+py$lfe_lastno <- NA
+py$fl_firstyes <- NA
+py$fl_lastno <- NA
+py$flo_firstyes <- NA
+py$flo_lastno <- NA
+py$fle_firstyes <- NA
+py$fle_lastno <- NA
+py$fr_firstyes <- NA
+py$fr_lastno <- NA
+py$frr_firstyes <- NA
+py$frr_lastno <- NA
+
+# Loop through each plant-year (note that this can take a few minutes)
+grps <- unique(pl_pheno_classes$group_code)
+grpsc <- unique(pl_pheno_classes$stat_cols_g)
+
+# Loop through plant-years
+for (i in 1:nrow(py)) {
+  
+  # Extract data for plant-year 
+  tmp1 <- plg_status[plg_status$plantyr == py$plantyr[i],]
+  
+  # Loop through pheno groups
+  for (j in 1:length(grps)) {
+    if (py[i, paste0("n_", grps[j], "_yes")] == 0) {next}
+    
+    # Extract only those dates when pheno group status recorded
+    tmp2 <- tmp1[!is.na(tmp1[,grpsc[j]]),]
+    
+    # Identify rows of tmp2 with first "yes" and first "no"
+    first_yes_ind <- first(which(tmp2[,grpsc[j]] == 1))
+    first_no_ind <- first(which(tmp2[,grpsc[j]] == 0))
+    # Extract onset date (first doy with yes)
+    py[i, paste0(grps[j], "_firstyes")] <- tmp2$doy[first_yes_ind]
+    # Calculate number of days since last no. If there isn't a prior no, then
+    # days_lastno = NA
+    if (first_yes_ind > first_no_ind & !is.na(first_no_ind)) {
+      py[i, paste0(grps[j], "_lastno")] <- 
+        py[i, paste0(grps[j], "_firstyes")] - tmp2$doy[first_yes_ind - 1]
+    } else {
+      py[i, paste0(grps[j], "_lastno")] <- NA
+    }
+  }
+}
+# Could look at ranges of first yes doy to see whether we're running up against
+# boundaries and should reconsider using calendar year or water year
+
+#- Summarize/visualize onset data ---------------------------------------------#
+
+# Within each year, filter to include observations only if there is a preceding 
+# "no" within X days
+# Identify what the cutoff (X) will be:
+prior_days <- 14
+
+# Easiest to filter the data if we put in long form first
+onsets <- py %>%
+  select(-c(n_obs, first_obs, last_obs, 
+            contains("n_status"), contains("_yes"))) 
+onsets <- onsets %>%
+  pivot_longer(cols = c(ends_with("firstyes"),ends_with("lastno")),
+               names_to = c("phenogroup", ".value"),
+               names_sep = "_") %>%
+  data.frame()
+onsets <- onsets %>%
+  filter(!is.na(firstyes)) %>%
+  filter(!is.na(lastno) & lastno <= prior_days)
+# Check
+# sum(onsets$phenogroup == "flo"); sum(py$flo_lastno <= 14, na.rm = TRUE)
+
+# Look at sample sizes
+onsets %>% select(common_name, phenogroup) %>% table
+
+# Look at how sample sizes might change if we reduced the window for prior no
+onset_ss <- onsets %>%
+  group_by(common_name, phenogroup) %>%
+  summarize(n_firstyes_14 = n(),
+            n_firstyes_7 = sum(lastno <= 7),
+            .groups = "keep") %>%
+  data.frame() %>%  
+  mutate(prop_7 = round(n_firstyes_7 / n_firstyes_14, 2))
+onset_ss
+# By species
+onset_ss %>%
+  group_by(common_name) %>%
+  summarize(n_obs_14 = sum(n_firstyes_14),
+            mean_prop_7 = round(mean(prop_7), 2)) %>%
+  data.frame() %>%
+  arrange(desc(mean_prop_7))
+# By phenophase group
+onset_ss %>%
+  group_by(phenogroup) %>%
+  summarize(n_obs_14 = sum(n_firstyes_14),
+            mean_prop_7 = round(mean(prop_7), 2)) %>%
+  data.frame() %>%
+  arrange(desc(mean_prop_7))
+
+# Create a column in onsets df with nice names of phenophase groups, for plots
+onsets <- onsets %>%
+  mutate(group_labels = case_when(
+    phenogroup == "lf" ~ "Leaves",
+    phenogroup == "lfe" ~ "Colored leaves",
+    phenogroup == "fl" ~ "Flowers",
+    phenogroup == "flo" ~ "Open flowers",
+    phenogroup == "fle" ~ "Flower senescence",
+    phenogroup == "fr" ~ "Fruits",
+    phenogroup == "frr" ~ "Ripe fruits"
+  )) %>%
+  mutate(group_labels = factor(group_labels,
+                               levels = c("Colored leaves",
+                                          "Ripe fruits",
+                                          "Fruits",
+                                          "Flower senescence",
+                                          "Open flowers",
+                                          "Flowers",
+                                          "Leaves")))
+
+# Assign colors for each phenophase group
+color_vec <- c("#b2df8a",   # Leaves
+               "#fdbf6f",   # Flowers
+               "#ff7f00",   # Open flowers
+               "#b2beb5",   # Flower senescence
+               "#cab2d6",   # Fruits
+               "#6a3d9a",   # Ripe fruits
+               "#8c510a")   # Colored leaves
+# Name vector so colors are consistent across figures (in case not all levels 
+# are present in all figures)
+names(color_vec) <- rev(levels(onsets$group_labels))
+
+# Add sample sizes for each species-phenogroup combination to onsets
+onsets <- onsets %>%
+  group_by(common_name, phenogroup) %>%
+  mutate(n_obs_sppgroup = n()) %>%
+  ungroup() %>%
+  data.frame()
+
+# Add in functional group information
+onsets <- onsets %>%
+  left_join(select(species, common_name, functional_type), by = "common_name")
+onsets %>%
+  group_by(functional_type) %>%
+  summarize(n = n(),
+            n_spp = n_distinct(common_name)) %>%
+  data.frame()
+onsets <- onsets %>%
+  mutate(common_name_full = paste0(common_name, " (", 
+                                   str_to_lower(functional_type), ")"))
+# Combining all broadleaf since there's only one species of evergreen broadleaf
+# Combining evergreen conifer and pine
+# Combining forbs adn grasses
+onsets <- onsets %>%
+  mutate(func_group = case_when(
+    functional_type %in% c("Forb", "Graminoid", 
+                           "Semi-evergreen forb", "Evergreen forb") ~
+      "Forb or grass",
+    functional_type %in% c("Evergreen conifer", "Pine") ~ "Conifer",
+    str_detect(functional_type, "broadleaf") ~ "Broadleaf",
+    .default = functional_type
+  ))
+onsets <- onsets %>%
+  arrange(func_group, functional_type, common_name, .locale = "en")
+
+# Set minimum number of observations per species-phenogroup to summarize onset 
+# dates
+min_obs <- 5
+
+# Plot onset for one phenogroup by species (lumping years, sites together).
+# Functional groups in facets
+
+phenogs <- c("lf", "fl", "flo", "fr", "frr", "lfe")
+phenogs2 <- c("leaves", "flowers", "open flowers", "fruits", "ripe fruits",
+              "colored leaves")
+onsets_plot_width <- 6.5
+onsets_plot_heightmax <- 6.5
+total_nspp <- n_distinct(onsets$common_name[onsets$n_obs_sppgroup >= min_obs])
+
+for (i in 1:length(phenogs)) {
+  
+  phenog <- phenogs[i]
+  col <- color_vec[str_to_sentence(phenogs2[i])]
+  
+  # Create nice labels for dates on Y axes in plots
+  plotdat <- filter(onsets, phenogroup == phenog, n_obs_sppgroup >= min_obs)
+  mindoy <- min(plotdat$firstyes)
+  maxdoy <- max(plotdat$firstyes)
+  doys <- seq(mindoy, maxdoy)
+  plotdates <- as.Date(paste(2023, doys, sep = "-"), "%Y-%j")
+  date1ind <- which(day(plotdates) == 1)
+  doybreaks <- doys[date1ind]
+  datebreaks <- plotdates[date1ind] %>% format("%m/%d")
+  datelims <- c(min(doys), max(doys) + 10)
+  
+  # Function to help add sample sizes to plot (95% of the way across date axis)
+  n_fun <- function(x) {
+    return(data.frame(y = 0.99 * datelims[2],
+                      label = length(x)))
+  }
+  
+  # Calculate height of figure
+  plot_nspp <- n_distinct(plotdat$common_name)
+  onsets_plot_height <- onsets_plot_heightmax * (plot_nspp / total_nspp) + 0.5
+  
+  assign(paste0("onsets_plot_", phenog),
+         ggplot(data = plotdat, aes(x = common_name, y = firstyes)) +
+           geom_boxplot(fill = col) + 
+           stat_summary(fun.data = n_fun, geom = "text", hjust = 0.5,
+                        family = "sans", size = 3) +
+           labs(title = paste0("First observation of ", phenogs2[i])) +
+           ggforce::facet_col(~func_group, scales = "free_y", space = "free") +
+           scale_y_continuous(limits = datelims, breaks = doybreaks,
+                              labels = datebreaks) +
+           coord_flip() +
+           theme_bw() +
+           theme(axis.title = element_blank(),
+                 axis.text.x = element_text(size = 9), 
+                 axis.text.y = element_text(size = 9),
+                 strip.text = element_text(size = 9))
+  )
+  
+  # ggsave(paste0("output/onsets-plot-", phenog, "-", lpp_short, ".png"),
+  #        get(paste0("onsets_plot_", phenog)),
+  #        width = onsets_plot_width,
+  #        height = onsets_plot_height,
+  #        units = "in",
+  #        dpi = 600)
+  
+}
+# Saved a ggplot object for each phenogroup: onsets_plot_PG
+# and saved each to file
+
+# Plot species, phenophase group combos with a minimum number of observations
+onsets_sub <- onsets %>%
+  filter(n_obs_sppgroup >= min_obs) 
+
+spp <- unique(onsets_sub$common_name_full)
+
+# Create nice labels for dates on X axes in plots
+mindoy <- min(onsets_sub$firstyes)
+maxdoy <- max(onsets_sub$firstyes)
+doys <- seq(mindoy, maxdoy)
+plotdates <- as.Date(paste(2023, doys, sep = "-"), "%Y-%j")
+date1ind <- which(day(plotdates) == 1)
+doybreaks <- doys[date1ind]
+datebreaks <- plotdates[date1ind] %>% format("%m/%d")
+datelims <- c(min(doys), max(doys) + 10)
+
+# Plot onset dates for each species, 4 at a time
+
+onsets_sub <- onsets_sub %>%
+  group_by(common_name_full) %>%
+  mutate(spp_n_pg = length(unique(phenogroup))) %>%
+  ungroup() %>%
+  data.frame()
+onsets_sub_spp <- onsets_sub %>%
+  select(common_name_full, spp_n_pg) %>%
+  distinct()
+onsets_sub_spp$cum_n <- onsets_sub_spp$spp_n_pg[1]
+onsets_sub_spp$plot_num <- 1
+start <- 1
+for (i in 2:nrow(onsets_sub_spp)) {
+  onsets_sub_spp$cum_n[i] <- sum(onsets_sub_spp$spp_n_pg[start:i])
+  if (onsets_sub_spp$cum_n[i] <= 24) {
+    onsets_sub_spp$plot_num[i] <- onsets_sub_spp$plot_num[i - 1]
+  } else {
+    start <- i
+    onsets_sub_spp$cum_n[i] <- onsets_sub_spp$spp_n_pg[i]
+    onsets_sub_spp$plot_num[i] <- onsets_sub_spp$plot_num[i - 1] + 1
+  }
+}
+
+n_plots <- max(onsets_sub_spp$plot_num)
+max_height <- 7.5
+
+for (i in 1:n_plots) {
+  spps <- onsets_sub_spp$common_name_full[onsets_sub_spp$plot_num == i]
+  plotdat <- filter(onsets_sub, common_name_full %in% spps)
+  assign(paste0("onsets_p", i),
+         ggplot(data = plotdat,
+                aes(x = group_labels, y = firstyes, fill = group_labels)) +
+           geom_boxplot() +
+           stat_summary(fun.data = n_fun, geom = "text", hjust = 0.5, 
+                        family = "sans", size = 3) +
+           scale_y_continuous(limits = datelims, breaks = doybreaks, 
+                              labels = datebreaks) +
+           ggforce::facet_col(~factor(common_name_full, levels = spps), 
+                              scales = "free_y", space = "free") +
+           # facet_wrap(~ factor(common_name_full, levels = spps), ncol = 1) +
+           scale_fill_manual(values = color_vec) +
+           labs(x = "", y = "First day observed") +
+           coord_flip() +
+           theme_bw() +
+           theme(legend.position = "none",
+                 axis.title = element_blank(),
+                 axis.text.x = element_text(size = 9), 
+                 axis.text.y = element_text(size = 9),
+                 strip.text = element_text(size = 9))
+  )
+  n_distributions <- max(onsets_sub_spp$cum_n[onsets_sub_spp$plot_num == i])
+  fig_height <- (max_height - 1) * (n_distributions / 24) + 1
+  
+  # ggsave(paste0("output/onsets-plot-spp-", lpp_short, "-", i, ".png"),
+  #        get(paste0("onsets_p", i)),
+  #        width = onsets_plot_width,
+  #        height = fig_height,
+  #        units = "in",
+  #        dpi = 600)
+}
+
+#- Trends in onset dates ------------------------------------------------------#

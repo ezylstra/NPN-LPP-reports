@@ -1154,7 +1154,7 @@ onsets <- onsets %>%
     .default = functional_type
   ))
 onsets <- onsets %>%
-  arrange(func_group, functional_type, common_name)
+  arrange(func_group, functional_type, common_name, .locale = "en")
 
 # Set minimum number of observations per species-phenogroup to summarize onset 
 # dates
