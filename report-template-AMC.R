@@ -669,6 +669,12 @@ sitest <- sitest %>%
 #TODO: Decide whether we want filters for number of years (>= 3?), number
 # of observations (> 100?), or number of species?
 
+sitest_sub <- sitest %>%
+  select(-c(site_id, yr_first, yr_last)) %>%
+  mutate(site_name = str_trim(site_name, side = "both"))
+
+# write.table(sitest_sub, "clipboard", sep = "\t", row.names = FALSE)
+
 # Table with the number of observations per year?
 # Or maybe a figure, with total observations per year, and a few smaller lines 
 # for particular sites (or species) of interest?
