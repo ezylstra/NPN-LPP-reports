@@ -1,7 +1,7 @@
 library(ggmap)
 library(tmaptools)
 
-xextend <- 0.3
+xextend <- 1.0 # 0.3 for AMC, 1 for EWA
 yextend <- 0.3
 bb <- ggmap::make_bbox(lon = longitude, lat = latitude, data = sites, 
                        f = c(xextend, yextend))
@@ -20,7 +20,7 @@ map <- ggmap::get_stadiamap(bbox = bb,
                             maptype = maptype, 
                             color = mapcol,
                             force = TRUE, 
-                            zoom = 7)
+                            zoom = 13)
 # Note: can save a ggmap object to a RData file and then read it back with load
 # save(map, file = "xxx.RData")
 # load(file = "xxx.RData")
@@ -29,7 +29,7 @@ map <- ggmap::get_stadiamap(bbox = bb,
 
 sites_map <- ggmap(map) +
   geom_point(data = sites, aes(x = longitude, y = latitude),
-             color = "blue", alpha = 0.3, size = 1.5) +
+             color = "blue", alpha = 0.6, size = 1.5) +
   theme_void() # gets rid of axes completely
 sites_map
 # If we want to save map object without any surrounding white space by 

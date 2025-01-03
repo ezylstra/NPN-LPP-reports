@@ -863,4 +863,12 @@ species4 <- species2 %>%
   filter(!(kingdom == "Plantae" & n_individuals == 1))
 # write.table(species4, "clipboard", sep = "\t", row.names = FALSE)
 
-# PICK UP HERE ----------------------------------------------------------------#
+#- Map(s) ---------------------------------------------------------------------#
+
+# Should be options if there's one site, 1-9 sites, 10 or more sites
+
+# Might also be options we could turn on or off (eg, color gradiation depending
+# on the number of years or observations, inset map if a subset are in very
+# close proximity)
+
+# For now, see start in site-maps.R
