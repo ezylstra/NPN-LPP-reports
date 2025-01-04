@@ -1322,3 +1322,526 @@ for (i in 1:n_plots) {
 }
 
 #- Trends in onset dates ------------------------------------------------------#
+
+# For now, approaching this in a very simple way: 
+  # assuming that the date of the first yes in series is the onset date
+  # using the first yes of the year that was preceded by a no within X days
+  # just looking at linear trends in phenophase onset by spp or functional type
+
+# Set the maximum number of days between first yes and prior no
+prior_days_trends <- 14
+onsett <- onsets %>% filter(lastno <= prior_days_trends)
+
+# Identify the first year with >= 5 observations (across all species, 
+# phenophases, and sites) and remove data before then
+yr_obs <- count(onsett, yr) %>% arrange(yr)
+min_yr <- yr_obs$yr[which(yr_obs$n >= 5)][1]
+onsett <- onsett %>% filter(yr >= min_yr)
+
+onsett %>% select(common_name, phenogroup) %>% table() 
+# For EWA, there are too few individuals to model species-level trends for 
+# things. Will run models estimating trends in each functional group. Can also
+# likely run models estimating trends for certain groups of plants (oak, 
+# birch, maple, and maybe dogwood)
+
+# Add a "species group" ID
+onsett <- onsett %>%
+  mutate(spp_group = case_when(
+    str_detect(common_name, " oak") ~ "Oak",
+    str_detect(common_name, " birch") ~ "Birch",
+    str_detect(common_name, " maple") ~ "Maple",
+    str_detect(common_name, " dogwood") ~ "Dogwood",
+    .default = NA
+  ))
+
+# Run analyses for each functional group --------------------------------------#
+onsett %>% select(func_group, phenogroup) %>% table() 
+
+# Calculate the number of years we have data for each functional group-phenophase
+# combination, and the number of observations we have for each 
+# functional group-phenogroup-yr combination.
+onsett_fg <- onsett %>%
+  group_by(func_group, phenogroup) %>%
+  mutate(nyrs_fgph = n_distinct(yr)) %>%
+  ungroup() %>%
+  group_by(func_group, phenogroup, yr) %>%
+  mutate(n_fgphyr = n()) %>%
+  ungroup() %>%
+  data.frame()
+
+# Set minimum sample sizes (number of years with X observations) for each 
+# functional group-phenophase combination.
+min_yrs <- 4
+min_obs_per_yr <- 3
+onsett_fg <- onsett_fg %>%
+  group_by(func_group, phenogroup) %>%
+  mutate(nyrs_minss = n_distinct(yr[n_fgphyr >= min_obs_per_yr])) %>%
+  ungroup() %>%
+  data.frame()
+onsett_fg <- onsett_fg %>%
+  filter(nyrs_minss >= min_yrs)
+# Make sure first year has minimum sample size
+onsett_fg <- onsett_fg %>%
+  group_by(func_group, phenogroup) %>%
+  filter(!(yr == min(yr) & n_fgphyr < min_obs_per_yr)) %>%
+  ungroup() %>%
+  data.frame()
+
+onsett_fg %>% select(func_group, phenogroup) %>% table() 
+
+# Running one model for each functional group - phenophase, with random slopes 
+# for each species and random intercepts for each site, species, individual
+
+# Using ggeffects package to make and plot predictions
+# https://strengejacke.github.io/ggeffects/articles/introduction_randomeffects.html
+# With predict_response(), default is to produce 95% confidence intervals, but
+# could get prediction intervals with interval = "prediction". Function
+# generates predictions for an average/typical species, site, individual; or, if 
+# using the type = "random" argument, get predictions for each level of 
+# specified random effect.Can plot results directly, or convert to data.frame 
+# and then use ggplot()
+
+# Create nice labels for phenophase groups
+pl_pheno_classes <- pl_pheno_classes %>%
+  mutate(phenogroup = case_when(
+    group_code == "lf" ~ "Leaves",
+    group_code == "lfe" ~ "Colored leaves",
+    group_code == "fl" ~ "Flowers",
+    group_code == "flo" ~ "Open flowers",
+    group_code == "fle" ~ "Flower senescence",
+    group_code == "fr" ~ "Fruit",
+    group_code == "frr" ~ "Ripe fruit"
+  ))
+pl_pheno_match <- pl_pheno_classes %>%
+  select(group_code, phenogroup) %>%
+  rename(phenogroup_f = phenogroup) %>%
+  rename(phenogroup = group_code) %>%
+  mutate(phenogroup_f = factor(phenogroup_f,
+                               levels = c("Leaves",
+                                          "Flowers",
+                                          "Open flowers",
+                                          "Flower senescence",
+                                          "Fruit",
+                                          "Ripe fruit",
+                                          "Colored leaves"))) %>%
+  distinct()
+onsett_fg <- onsett_fg %>%
+  left_join(pl_pheno_match, by = "phenogroup")
+
+func_groups_df <- data.frame(
+  func_group = unique(onsett_fg$func_group),
+  func_group2 = str_replace_all(unique(onsett_fg$func_group), " ", "_"))
+
+# Create function to identify models that failed to converge
+is_warning_generated <- function(m) {
+  df <- summary(m)
+  !is.null(df$optinfo$conv$lme4$messages) && 
+    sum(grepl('failed to converge', df$optinfo$conv$lme4$messages)) > 0
+}
+
+for (i in 1:nrow(func_groups_df)) {
+  fgroup <- func_groups_df$func_group[i]
+  phenogs <- sort(unique(onsett_fg$phenogroup[onsett_fg$func_group == fgroup]))
+  
+  # Run mixed models
+  for (phenog in phenogs) {
+    dat <- filter(onsett_fg, func_group == fgroup, phenogroup == phenog)
+    if (n_distinct(dat$common_name) >= 4) {
+      suppressWarnings(
+        RSm <- lmer(firstyes ~ yr + (0 + yr|common_name) + (1|common_name) + 
+                      (1|site_id) + (1|individual_id), data = dat)
+      )
+      if (is_warning_generated(RSm)) {
+        RSm <- lmer(firstyes ~ yr + (0 + yr|common_name) + (1|common_name) + 
+                      (1|site_id) + (1|individual_id), data = dat,
+                    control = lmerControl(optimizer = "Nelder_Mead"))
+        if (is_warning_generated(RSm)) {
+          print(paste0("Model failed to converge for RSm: ", fgroup, ", ", phenog))
+        }
+      }
+    } else {
+      suppressWarnings(
+        RSm <- lmer(firstyes ~ yr + (1|common_name) + (1|site_id) + (1|individual_id), 
+                    data = dat)
+      )
+      if (is_warning_generated(FSm)) {
+        RSm <- lmer(firstyes ~ yr + (1|common_name) + (1|site_id) + (1|individual_id), 
+                    data = dat,
+                    control = lmerControl(optimizer = "Nelder_Mead"))
+        if (is_warning_generated(RSm)) {
+          print(paste0("Model failed to converge for RSm: ", fgroup, ", ", phenog))
+        }
+      }
+    }
+    RSp <- data.frame(predict_response(RSm, terms = "yr")) %>%
+      mutate(group = "mean", 
+             func_group = fgroup,
+             phenogroup = phenog) %>%
+      rename(yr = x, spp = group) %>%
+      mutate(modeled_spp = if_else(n_distinct(dat$common_name) >= 4, 
+                                   "random", "none"))
+    if (phenog == phenogs[1]) {
+      preds <- RSp
+    } else {
+      preds <- rbind(preds, RSp)
+    }
+
+    # Extract estimate of trends for functional groups
+    suppressWarnings(RSmt <- lmerTest::as_lmerModLmerTest(RSm))
+    trend <- summary(RSmt)$coefficients["yr", ]
+    re_names <- names(summary(RSm)$varcor)
+    # est, SE, df, t, P  
+    
+    trends_new <- data.frame(
+      func_group = fgroup,
+      phenogroup = phenog,
+      nobs = nrow(dat),
+      nspp = n_distinct(dat$common_name),
+      minyr = min(dat$yr),
+      maxyr = max(dat$yr),
+      random_slopes = ifelse(!"common_name.1" %in% re_names, "No", 
+                             ifelse("common_name.1" %in% re_names &
+                                      VarCorr(RSm)$common_name.1[1, 1] == 0, 
+                                    "No", "Yes")),
+      random_ints = str_c(str_subset(re_names, ".1", negate = TRUE), 
+                          collapse = ", "),
+      beta = round(trend["Estimate"], 5),
+      se = round(trend["Std. Error"], 5),
+      df = round(trend["df"]),
+      t = round(trend["t value"], 3),
+      P = round(trend["Pr(>|t|)"], 4),
+      row.names = NULL
+    )
+    if (phenog == phenogs[1]) {
+      trends <- trends_new
+    } else {
+      trends <- rbind(trends, trends_new)
+    }
+  }
+  # Will likely get some warnings about singular fits (and maybe other stuff,
+  # but hopefully none of it is prohibitive)
+  
+  preds <- preds %>%
+    left_join(pl_pheno_match, by = "phenogroup")
+  
+  # Create nice labels for dates on Y axes in plots
+  plotdat <- filter(onsett_fg, func_group == fgroup)
+  mindoy <- min(plotdat$firstyes)
+  maxdoy <- max(plotdat$firstyes)
+  doys <- seq(mindoy, maxdoy)
+  plotdates <- as.Date(paste(2023, doys, sep = "-"), "%Y-%j")
+  date1ind <- which(day(plotdates) == 1)
+  doybreaks <- doys[date1ind]
+  datebreaks <- str_glue("{month(plotdates[date1ind])}/{day(plotdates[date1ind])}") %>%
+    as.character()
+  
+  # Create text for each panel (beta estimates and P-values)
+  plotdat_summary <- plotdat %>%
+    group_by(phenogroup) %>%
+    summarize(mindoy = min(firstyes),
+              maxdoy = max(firstyes)) %>%
+    data.frame() %>%
+    mutate(rangedoy = maxdoy - mindoy,
+           label1y = maxdoy,
+           label2y = label1y - (0.065 * rangedoy)) %>%
+    select(-c(mindoy, maxdoy, rangedoy))
+  ann_text <- data.frame(yr = max(preds$yr),
+                         phenogroup = trends$phenogroup) %>%
+    left_join(distinct(select(preds, phenogroup, phenogroup_f)), 
+              by = "phenogroup") %>%
+    left_join(plotdat_summary, by = "phenogroup")
+  ann_text <- ann_text %>%
+    left_join(select(trends, phenogroup, beta, P), by = "phenogroup") %>%
+    mutate(beta2 = formatC(beta, digits = 2, format = "f"),
+           P2 = formatC(P, digits = 2, format = "f"),
+           Pstr = if_else(P2 == "0.00", " < 0.01", paste0(" = ", P2))) %>%
+    mutate(label1 = paste0("slope = ", beta2, " days/yr"),
+           label2 = paste0("P", Pstr))
+  
+  text_size <- 8
+  ci_alpha <- 0.2
+  
+  # Save ggplot object
+  assign(paste0("trendsplot_", func_groups_df$func_group2[i]),
+         ggplot() +
+           geom_point(data = plotdat,
+                      aes(x = yr, y = firstyes, color = common_name),
+                      position = position_dodge(width = 0.3),
+                      size = 0.7, alpha = 0.4) +
+           geom_line(data = filter(preds, spp == "mean"),
+                     aes(x = yr, y = predicted), linewidth = 0.8) +
+           geom_ribbon(data = filter(preds, spp == "mean"),
+                       aes(x = yr, ymin = conf.low, ymax = conf.high),
+                       alpha = ci_alpha) +
+           facet_wrap(.~phenogroup_f, scales = "free_y") +
+           geom_text(data = ann_text,
+                     aes(y = label1y, x = yr, label = label1, hjust = 1, vjust = 1,
+                         family = "sans"), size = text_size/.pt) +
+           geom_text(data = ann_text,
+                     aes(y = label2y, x = yr, label = label2, hjust = 1,
+                         vjust = 1, family = "sans"), size = text_size/.pt) +
+           labs(y = "First observation date", fill = "", color = "") +
+           scale_y_continuous(breaks = doybreaks, labels = datebreaks) +
+           theme_bw() +
+           theme(axis.title.x = element_blank(),
+                 panel.grid.major = element_blank(),
+                 panel.grid.minor = element_blank(), 
+                 legend.position = "none",
+                 axis.text.x = element_text(size = text_size), 
+                 axis.text.y = element_text(size = text_size),
+                 strip.text = element_text(size = text_size),
+                 axis.title.y = element_text(size = text_size + 1))
+  )
+  # ggsave(paste0("output/trends-plot-", func_groups_df$func_group2[i],
+  #               "-", lpp_short, ".png"),
+  #        get(paste0("trendsplot_", func_groups_df$func_group2[i])),
+  #        width = 6.5,
+  #        height = 6.5,
+  #        units = "in",
+  #        dpi = 600)
+  
+  assign(paste0("preds_", func_groups_df$func_group2[i]), preds)
+  assign(paste0("trends_", func_groups_df$func_group2[i]), trends)
+}
+
+# For each functional group, have:
+# trendsplot_FUNC = ggplot object with a panel for each phenophase
+# preds_FUNC = table with trend predictions (and 95% CIs)
+# trends_FUNC = table with trend estimates
+
+fg_trends <- get(paste0("trends_", func_groups_df$func_group2[1]))
+for (i in 2:nrow(func_groups_df)) {
+  fg_trends <- rbind(fg_trends, 
+                     get(paste0("trends_", func_groups_df$func_group2[i])))
+}
+fg_trends <- fg_trends %>%
+  mutate(random_ints = str_remove_all(random_ints, "_id")) %>%
+  mutate(random_ints = str_replace_all(random_ints, "common_name", "species"))
+# write.table(fg_trends, "clipboard", sep = "\t", row.names = FALSE)
+
+# Run analyses for species groups ---------------------------------------------#
+# PICK UP HERE
+# Add lines for random slopes (if possible, at least for some groups)
+# Decide which species groups are worth looking at (prob only Oak and Maple)
+
+onsett_sg <- onsett %>% 
+  filter(!is.na(spp_group))
+
+# Calculate the number of years we have data for each group-phenophase and the 
+# number of observations we have for each group-phenophase-yr combination.
+onsett_sg <- onsett_sg %>%
+  group_by(spp_group, phenogroup) %>%
+  mutate(nyrs_sgph = n_distinct(yr)) %>%
+  ungroup() %>%
+  group_by(spp_group, phenogroup, yr) %>%
+  mutate(n_sgphyr = n()) %>%
+  ungroup() %>%
+  data.frame()
+
+# Set minimum sample sizes (number of years with X observations) for each 
+# species group-phenophase combination.
+min_yrs <- 4
+min_obs_per_yr <- 3
+onsett_sg <- onsett_sg %>%
+  group_by(spp_group, phenogroup) %>%
+  mutate(nyrs_minss = n_distinct(yr[n_sgphyr >= min_obs_per_yr])) %>%
+  ungroup() %>%
+  data.frame()
+onsett_sg <- onsett_sg %>%
+  filter(nyrs_minss >= min_yrs)
+# Make sure first year has minimum sample size
+onsett_sg <- onsett_sg %>%
+  group_by(spp_group, phenogroup) %>%
+  filter(!(yr == min(yr) & n_sgphyr < min_obs_per_yr)) %>%
+  ungroup() %>%
+  data.frame()
+
+onsett_sg %>% select(spp_group, phenogroup) %>% table() 
+
+onsett_sg <- onsett_sg %>%
+  left_join(pl_pheno_match, by = "phenogroup")
+
+spp_groups <- unique(onsett_sg$spp_group)
+
+# Running one model for each species group - phenophase, with random slopes 
+# for each species and random intercepts for each site, species, individual
+
+for (i in 1:length(spp_groups)) {
+  sgroup <- spp_groups[i]
+  phenogs <- sort(unique(onsett_sg$phenogroup[onsett_sg$spp_group == sgroup]))
+  
+  # Run mixed models
+  for (phenog in phenogs) {
+    dat <- filter(onsett_sg, spp_group == sgroup, phenogroup == phenog)
+    if (n_distinct(dat$common_name) >= 4) {
+      suppressWarnings(
+        RSm <- lmer(firstyes ~ yr + (0 + yr|common_name) + (1|common_name) + 
+                      (1|site_id) + (1|individual_id), data = dat)
+      )
+      if (is_warning_generated(RSm)) {
+        RSm <- lmer(firstyes ~ yr + (0 + yr|common_name) + (1|common_name) + 
+                      (1|site_id) + (1|individual_id), data = dat,
+                    control = lmerControl(optimizer = "Nelder_Mead"))
+        if (is_warning_generated(RSm)) {
+          print(paste0("Model failed to converge for RSm: ", fgroup, ", ", phenog))
+        }
+      }
+    } else {
+      suppressWarnings(
+        RSm <- lmer(firstyes ~ yr + (1|common_name) + (1|site_id) + (1|individual_id), 
+                    data = dat)
+      )
+      if (is_warning_generated(RSm)) {
+        RSm <- lmer(firstyes ~ yr + (1|common_name) + (1|site_id) + (1|individual_id), 
+                    data = dat,
+                    control = lmerControl(optimizer = "Nelder_Mead"))
+        if (is_warning_generated(RSm)) {
+          print(paste0("Model failed to converge for RSm: ", fgroup, ", ", phenog))
+        }
+      }
+    }
+    RSp <- data.frame(predict_response(RSm, terms = "yr")) %>%
+      mutate(group = "mean", 
+             spp_group = sgroup,
+             phenogroup = phenog) %>%
+      rename(yr = x, spp = group) %>%
+      mutate(modeled_spp = if_else(n_distinct(dat$common_name) >= 4, 
+                                   "random", "none"))
+    if (phenog == phenogs[1]) {
+      preds <- RSp
+    } else {
+      preds <- rbind(preds, RSp)
+    }
+    
+    # Extract estimate of trends for functional groups
+    suppressWarnings(RSmt <- lmerTest::as_lmerModLmerTest(RSm))
+    trend <- summary(RSmt)$coefficients["yr", ]
+    re_names <- names(summary(RSm)$varcor)
+    # est, SE, df, t, P  
+    
+    trends_new <- data.frame(
+      spp_group = sgroup,
+      phenogroup = phenog,
+      nobs = nrow(dat),
+      nspp = n_distinct(dat$common_name),
+      minyr = min(dat$yr),
+      maxyr = max(dat$yr),
+      random_slopes = ifelse(!"common_name.1" %in% re_names, "No", 
+                             ifelse("common_name.1" %in% re_names &
+                                      VarCorr(RSm)$common_name.1[1, 1] == 0, 
+                             "No", "Yes")),
+      random_ints = str_c(str_subset(re_names, ".1", negate = TRUE), 
+                          collapse = ", "),
+      beta = round(trend["Estimate"], 5),
+      se = round(trend["Std. Error"], 5),
+      df = round(trend["df"]),
+      t = round(trend["t value"], 3),
+      P = round(trend["Pr(>|t|)"], 4),
+      row.names = NULL
+    )
+    if (phenog == phenogs[1]) {
+      trends <- trends_new
+    } else {
+      trends <- rbind(trends, trends_new)
+    }
+  }
+  # Will likely get some warnings about singular fits (and maybe other stuff,
+  # but hopefully none of it is prohibitive)
+  
+  preds <- preds %>%
+    left_join(pl_pheno_match, by = "phenogroup")
+  
+  # Create nice labels for dates on Y axes in plots
+  plotdat <- filter(onsett_sg, spp_group == sgroup)
+  mindoy <- min(plotdat$firstyes)
+  maxdoy <- max(plotdat$firstyes)
+  doys <- seq(mindoy, maxdoy)
+  plotdates <- as.Date(paste(2023, doys, sep = "-"), "%Y-%j")
+  date1ind <- which(day(plotdates) == 1)
+  doybreaks <- doys[date1ind]
+  datebreaks <- str_glue("{month(plotdates[date1ind])}/{day(plotdates[date1ind])}") %>%
+    as.character()
+  
+  # Create text for each panel (beta estimates and P-values)
+  plotdat_summary <- plotdat %>%
+    group_by(phenogroup) %>%
+    summarize(mindoy = min(firstyes),
+              maxdoy = max(firstyes)) %>%
+    data.frame() %>%
+    mutate(rangedoy = maxdoy - mindoy,
+           label1y = maxdoy,
+           label2y = label1y - (0.065 * rangedoy)) %>%
+    select(-c(mindoy, maxdoy, rangedoy))
+  ann_text <- data.frame(yr = max(preds$yr),
+                         phenogroup = trends$phenogroup) %>%
+    left_join(distinct(select(preds, phenogroup, phenogroup_f)), 
+              by = "phenogroup") %>%
+    left_join(plotdat_summary, by = "phenogroup")
+  ann_text <- ann_text %>%
+    left_join(select(trends, phenogroup, beta, P), by = "phenogroup") %>%
+    mutate(beta2 = formatC(beta, digits = 2, format = "f"),
+           P2 = formatC(P, digits = 2, format = "f"),
+           Pstr = if_else(P2 == "0.00", " < 0.01", paste0(" = ", P2))) %>%
+    mutate(label1 = paste0("slope = ", beta2, " days/yr"),
+           label2 = paste0("P", Pstr))
+  
+  text_size <- 8
+  ci_alpha <- 0.2
+  
+  # Save ggplot object
+  assign(paste0("trendsplot_", sgroup),
+         ggplot() +
+           geom_point(data = plotdat,
+                      aes(x = yr, y = firstyes, color = common_name),
+                      position = position_dodge(width = 0.3),
+                      size = 0.7, alpha = 0.4) +
+           geom_line(data = filter(preds, spp == "mean"),
+                     aes(x = yr, y = predicted), linewidth = 0.8) +
+           geom_ribbon(data = filter(preds, spp == "mean"),
+                       aes(x = yr, ymin = conf.low, ymax = conf.high),
+                       alpha = ci_alpha) +
+           facet_wrap(.~phenogroup_f, scales = "free_y") +
+           geom_text(data = ann_text,
+                     aes(y = label1y, x = yr, label = label1, hjust = 1, vjust = 1,
+                         family = "sans"), size = text_size/.pt) +
+           geom_text(data = ann_text,
+                     aes(y = label2y, x = yr, label = label2, hjust = 1,
+                         vjust = 1, family = "sans"), size = text_size/.pt) +
+           labs(y = "First observation date", fill = "", color = "") +
+           scale_y_continuous(breaks = doybreaks, labels = datebreaks) +
+           theme_bw() +
+           theme(axis.title.x = element_blank(),
+                 panel.grid.major = element_blank(),
+                 panel.grid.minor = element_blank(), 
+                 legend.position = "none",
+                 axis.text.x = element_text(size = text_size), 
+                 axis.text.y = element_text(size = text_size),
+                 strip.text = element_text(size = text_size),
+                 axis.title.y = element_text(size = text_size + 1))
+  )
+  ggsave(paste0("output/trends-plot-", sgroup,
+                "-", lpp_short, ".png"),
+         get(paste0("trendsplot_", sgroup)),
+         width = 6.5,
+         height = 6.5,
+         units = "in",
+         dpi = 600)
+  
+  assign(paste0("preds_", sgroup), preds)
+  assign(paste0("trends_", sgroup), trends)
+}
+
+# For each species group, have:
+# trendsplot_SPPG = ggplot object with a panel for each phenophase
+# preds_SPPG = table with trend predictions (and 95% CIs)
+# trends_SPPG = table with trend estimates
+
+sg_trends <- get(paste0("trends_", spp_groups[1]))
+for (i in 2:length(spp_groups)) {
+  sg_trends <- rbind(sg_trends, 
+                     get(paste0("trends_", spp_groups[i])))
+}
+sg_trends <- sg_trends %>%
+  mutate(random_ints = str_remove_all(random_ints, "_id")) %>%
+  mutate(random_ints = str_replace_all(random_ints, "common_name", "species"))
+# write.table(sg_trends, "clipboard", sep = "\t", row.names = FALSE)
