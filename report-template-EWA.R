@@ -15,10 +15,6 @@ require(lme4)
 require(ggeffects) # Predictions & plotting for mixed-effect models
 # require(lmerTest) # Don't want to load this (but will call in script)
 
-# require(geosphere) # for optional site clustering
-# require(fpc) # for optional site clustering
-# require(RColorBrewer)
-
 rm(list = ls())
 
 #- Specify data of interest ---------------------------------------------------#
@@ -209,7 +205,7 @@ si <- si %>%
 si <- si %>%
   filter(dups == 1) %>%
   select(-c(obsnum, dups)) %>%
-  arrange(common_name, obsdate, person_id, phenophase_id)
+  arrange(common_name, obsdate, person_id, phenophase_id, .locale = "en")
 
 #- Accounting for multiple observations by different people -------------------#
 # Same plant or animal, same phenophase, same date - different observers
@@ -249,7 +245,7 @@ animal_obs <- si %>%
             abundance = na_max(abundance_value),
             intensity = na_max(intensity),
             .groups = "keep") %>%
-  arrange(common_name, site_id, obsdate, person_id) %>%
+  arrange(common_name, site_id, obsdate, person_id, .locale = "en") %>%
   data.frame()
 
 # Put into wide form, so each row is a summary of an observation 
@@ -293,13 +289,14 @@ inddatep$obsnum <- 1:nrow(inddatep)
 animal_obs2 <- si %>%
   filter(kingdom == "Animalia") %>%
   arrange(common_name, individual_id, obsdate, phenophase_id, 
-          desc(phenophase_status), desc(abundance_value), desc(intensity)) %>%
+          desc(phenophase_status), desc(abundance_value), desc(intensity), 
+          .locale = "en") %>%
   left_join(select(inddatep, -c(n_obs, common_name)),
             by = c("individual_id", "obsdate", "phenophase_id")) %>%
   mutate(dups = sequence(rle(as.character(obsnum))$lengths)) %>%
   filter(dups == 1) %>%
   select(-c(obsnum, dups, person_id)) %>%
-  arrange(common_name, individual_id, obsdate, phenophase_id)
+  arrange(common_name, individual_id, obsdate, phenophase_id, .locale = "en")
 
 #- Creating datasets for plant observations -----------------------------------#
 
@@ -313,7 +310,7 @@ animal_obs2 <- si %>%
 si_sub_plants <- si %>%
   filter(kingdom == "Plantae") %>%
   arrange(common_name, individual_id, obsdate, phenophase_id, 
-          desc(phenophase_status), desc(intensity)) 
+          desc(phenophase_status), desc(intensity), .locale = "en") 
 
   # A little data exploration...
   # For each species, there is only 1 phenophase per pheno class EXCEPT:
@@ -740,7 +737,7 @@ species2 <- si %>%
 freq_pl <- plant_obs2 %>%
   select(site_id, common_name, individual_id, day_of_year, yr) %>%
   filter(yr %in% yrs_subset) %>%
-  arrange(common_name, individual_id, yr, day_of_year)
+  arrange(common_name, individual_id, yr, day_of_year, .locale = "en")
 freq_pl$interval <- NA
 for (i in 2:nrow(freq_pl)) {
   if (freq_pl$individual_id[i] == freq_pl$individual_id[i - 1] &
@@ -765,7 +762,7 @@ freq_an <- animal_obs2 %>%
   select(site_id, common_name, individual_id, day_of_year, yr) %>%
   distinct() %>%
   filter(yr %in% yrs_subset) %>%
-  arrange(common_name, individual_id, yr, day_of_year)
+  arrange(common_name, individual_id, yr, day_of_year, .locale = "en")
 freq_an$interval <- NA
 for (i in 2:nrow(freq_an)) {
   if (freq_an$individual_id[i] == freq_an$individual_id[i - 1] &
@@ -803,7 +800,7 @@ species3 <- species2 %>%
                                              "Insect", 
                                              "Mammal",
                                              "Reptile"))) %>%
-  arrange(desc(kingdom), functional_type, common_name)
+  arrange(desc(kingdom), functional_type, common_name, .locale = "en")
 # write.table(species3, "clipboard", sep = "\t", row.names = FALSE)
 
 # Create a smaller subset for report:
@@ -821,7 +818,7 @@ freq_an1 <- animal_obs2 %>%
             .groups = "keep") %>%
   data.frame() %>%
   filter(yr %in% yrs_subset) %>%
-  arrange(common_name, individual_id, yr, day_of_year)
+  arrange(common_name, individual_id, yr, day_of_year, .locale = "en")
 freq_an1$interval <- NA
 for (i in 2:nrow(freq_an1)) {
   if (freq_an1$individual_id[i] == freq_an1$individual_id[i - 1] &
@@ -859,7 +856,7 @@ species4 <- species2 %>%
                                              "Insect", 
                                              "Mammal",
                                              "Reptile"))) %>%
-  arrange(desc(kingdom), functional_type, common_name) %>%
+  arrange(desc(kingdom), functional_type, common_name, .locale = "en") %>%
   filter(!(kingdom == "Plantae" & n_individuals == 1))
 # write.table(species4, "clipboard", sep = "\t", row.names = FALSE)
 
@@ -1342,15 +1339,14 @@ onsett %>% select(common_name, phenogroup) %>% table()
 # For EWA, there are too few individuals to model species-level trends for 
 # things. Will run models estimating trends in each functional group. Can also
 # likely run models estimating trends for certain groups of plants (oak, 
-# birch, maple, and maybe dogwood)
+# maple, maybe birch?)
 
-# Add a "species group" ID
 onsett <- onsett %>%
+  left_join(select(species, common_name, genus), by = "common_name") %>%
   mutate(spp_group = case_when(
-    str_detect(common_name, " oak") ~ "Oak",
-    str_detect(common_name, " birch") ~ "Birch",
-    str_detect(common_name, " maple") ~ "Maple",
-    str_detect(common_name, " dogwood") ~ "Dogwood",
+    str_detect(genus, "Quercus") ~ "Oak",
+    str_detect(genus, "Acer") ~ "Maple",
+    str_detect(genus, "Betula") ~ "Birch",
     .default = NA
   ))
 
@@ -1620,9 +1616,6 @@ fg_trends <- fg_trends %>%
 # write.table(fg_trends, "clipboard", sep = "\t", row.names = FALSE)
 
 # Run analyses for species groups ---------------------------------------------#
-# PICK UP HERE
-# Add lines for random slopes (if possible, at least for some groups)
-# Decide which species groups are worth looking at (prob only Oak and Maple)
 
 onsett_sg <- onsett %>% 
   filter(!is.na(spp_group))
@@ -1713,7 +1706,7 @@ for (i in 1:length(spp_groups)) {
       preds <- rbind(preds, RSp)
     }
     
-    # Extract estimate of trends for functional groups
+    # Extract estimate of trends for species groups
     suppressWarnings(RSmt <- lmerTest::as_lmerModLmerTest(RSm))
     trend <- summary(RSmt)$coefficients["yr", ]
     re_names <- names(summary(RSm)$varcor)
@@ -1790,7 +1783,10 @@ for (i in 1:length(spp_groups)) {
   
   # Save ggplot object
   assign(paste0("trendsplot_", sgroup),
-         ggplot() +
+         ggplot(data = filter(preds, spp != "mean"), aes(x = yr, y = predicted)) +
+           geom_line(aes(color = spp)) +
+           geom_ribbon(aes(ymin = conf.low, ymax = conf.high, fill = spp), 
+                       alpha = ci_alpha) +
            geom_point(data = plotdat,
                       aes(x = yr, y = firstyes, color = common_name),
                       position = position_dodge(width = 0.3),
@@ -1813,19 +1809,25 @@ for (i in 1:length(spp_groups)) {
            theme(axis.title.x = element_blank(),
                  panel.grid.major = element_blank(),
                  panel.grid.minor = element_blank(), 
-                 legend.position = "none",
+                 legend.position = "bottom",
                  axis.text.x = element_text(size = text_size), 
                  axis.text.y = element_text(size = text_size),
                  strip.text = element_text(size = text_size),
-                 axis.title.y = element_text(size = text_size + 1))
+                 axis.title.y = element_text(size = text_size + 1),
+                 legend.title = element_text(size = text_size),
+                 legend.text = element_text(size = text_size))
   )
-  ggsave(paste0("output/trends-plot-", sgroup,
-                "-", lpp_short, ".png"),
-         get(paste0("trendsplot_", sgroup)),
-         width = 6.5,
-         height = 6.5,
-         units = "in",
-         dpi = 600)
+  max_ht <- 6.5
+  fig_ht <- ifelse(nrow(trends) < 4,
+                   (max_ht - 1) / 2 + 1,
+                   max_ht)
+  # ggsave(paste0("output/trends-plot-", sgroup,
+  #               "-", lpp_short, ".png"),
+  #        get(paste0("trendsplot_", sgroup)),
+  #        width = 6.5,
+  #        height = fig_ht,
+  #        units = "in",
+  #        dpi = 600)
   
   assign(paste0("preds_", sgroup), preds)
   assign(paste0("trends_", sgroup), trends)
@@ -1845,3 +1847,5 @@ sg_trends <- sg_trends %>%
   mutate(random_ints = str_remove_all(random_ints, "_id")) %>%
   mutate(random_ints = str_replace_all(random_ints, "common_name", "species"))
 # write.table(sg_trends, "clipboard", sep = "\t", row.names = FALSE)
+
+
