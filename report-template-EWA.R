@@ -1848,4 +1848,285 @@ sg_trends <- sg_trends %>%
   mutate(random_ints = str_replace_all(random_ints, "common_name", "species"))
 # write.table(sg_trends, "clipboard", sep = "\t", row.names = FALSE)
 
+#- Characterizing phenophase periods ------------------------------------------#
+# We're not always just interested in onsets....
+
+df <- plg_status
+
+# Add week to the data so we can calculate weekly proportions
+# We'll also create wk_doy columns to assign each week with a day of the year:
+# wk_doy1 = start of each week (eg, date for week 1 would be Jan 1)
+# wk_doy4 = middle of each week (eg, date for week 1 would be Jan 4)
+df <- df %>%
+  # remove phenophase that is almost always NA
+  select(-status_fle) %>%
+  mutate(wk = week(obsdate)) %>%
+  # Remove observations in week 53
+  filter(wk < 53) %>%
+  # Create wk_doy columns
+  mutate(wk_date1 = parse_date_time(paste(2024, wk, 1, sep = "/"), "Y/W/w"),
+         wk_date1 =  as.Date(wk_date1),
+         wk_doy1 = yday(wk_date1),
+         wk_date4 = parse_date_time(paste(2024, wk, 4, sep = "/"), "Y/W/w"),
+         wk_date4 =  as.Date(wk_date4),
+         wk_doy4 = yday(wk_date4))
+
+# Keep just one observation of each plant and phenophase, each week. Sort so the 
+# most advanced phenophase gets kept (if more than one value in a week)
+df_lf <- df %>%
+  arrange(common_name, individual_id, yr, wk, desc(status_lf)) %>%
+  distinct(individual_id, yr, wk, .keep_all = TRUE) %>%
+  filter(!is.na(status_lf)) %>%
+  mutate(phenogroup = "lf") %>%
+  rename(status = status_lf) %>%
+  select(-contains("status_"))
+df_fl <- df %>%
+  arrange(common_name, individual_id, yr, wk, desc(status_fl)) %>%
+  distinct(individual_id, yr, wk, .keep_all = TRUE) %>%
+  filter(!is.na(status_fl)) %>%
+  mutate(phenogroup = "fl") %>%
+  rename(status = status_fl) %>%
+  select(-contains("status_"))
+df_flo <- df %>%
+  arrange(common_name, individual_id, yr, wk, desc(status_flo)) %>%
+  distinct(individual_id, yr, wk, .keep_all = TRUE) %>%
+  filter(!is.na(status_flo)) %>%
+  mutate(phenogroup = "flo") %>%
+  rename(status = status_flo) %>%
+  select(-contains("status_"))
+df_fr <- df %>%
+  arrange(common_name, individual_id, yr, wk, desc(status_fr)) %>%
+  distinct(individual_id, yr, wk, .keep_all = TRUE) %>%
+  filter(!is.na(status_fr)) %>%
+  mutate(phenogroup = "fr") %>%
+  rename(status = status_fr) %>%
+  select(-contains("status_"))
+df_frr <- df %>%
+  arrange(common_name, individual_id, yr, wk, desc(status_frr)) %>%
+  distinct(individual_id, yr, wk, .keep_all = TRUE) %>%
+  filter(!is.na(status_frr)) %>%
+  mutate(phenogroup = "frr") %>%
+  rename(status = status_frr) %>%
+  select(-contains("status_"))
+df_lfe <- df %>%
+  arrange(common_name, individual_id, yr, wk, desc(status_lfe)) %>%
+  distinct(individual_id, yr, wk, .keep_all = TRUE) %>%
+  filter(!is.na(status_lfe)) %>%
+  mutate(phenogroup = "lfe") %>%
+  rename(status = status_lfe) %>%
+  select(-contains("status_"))
+df <- bind_rows(df_lf, df_fl, df_flo, df_fr, df_frr, df_lfe)
+
+# Summarize data available across all plants, years, phenophases
+propdat_wk <- df %>%
+  group_by(common_name, phenogroup, wk) %>%
+  summarize(n_obs = n(), 
+            n_indiv = n_distinct(individual_id),
+            n_yrs = n_distinct(yr),
+            n_sites = n_distinct(site_id),
+            .groups = "keep") %>%
+  data.frame()
+propdat_wk_spp <- propdat_wk %>%
+  group_by(common_name, phenogroup) %>%
+  summarize(mn_obs_per_wk = round(mean(n_obs), 1),
+            max_n_yrs = max(n_yrs),
+            max_n_sites = max(n_sites),
+            .groups = "keep") %>%
+  data.frame()
+
+# Exclude any species, phenophase combinations where the mean number of
+# observations per week is < 10
+spp_ph_keep <- propdat_wk_spp %>%
+  filter(mn_obs_per_wk >= 10) %>%
+  mutate(spp_ph = paste0(common_name, "_", phenogroup))
+df <- df %>%
+  mutate(spp_ph = paste0(common_name, "_", phenogroup)) %>%
+  filter(spp_ph %in% spp_ph_keep$spp_ph)
+
+# Calculate weekly proportions of yeses for each species, phenophase
+pl_pheno_match <- pl_pheno_classes %>%
+  select(group_code, phenogroup) %>%
+  rename(phenogroup_f = phenogroup) %>%
+  rename(phenogroup = group_code) %>%
+  mutate(phenogroup_f = factor(phenogroup_f,
+                               levels = c("Leaves",
+                                          "Flowers",
+                                          "Open flowers",
+                                          "Flower senescence",
+                                          "Fruit",
+                                          "Ripe fruit",
+                                          "Colored leaves"))) %>%
+  distinct()
+onsett_match <- onsett %>%
+  left_join(pl_pheno_match, by = "phenogroup")
+wkprops <- df %>%
+  group_by(common_name, phenogroup, wk, wk_date1, wk_doy1, 
+           wk_date4, wk_doy4) %>%
+  summarize(n_obs = n(),
+            n_yes = sum(status),
+            .groups = "keep") %>%
+  data.frame() %>%
+  mutate(prop_yes = n_yes / n_obs) %>%
+  left_join(distinct(select(onsett_match, phenogroup, phenogroup_f)), 
+            by = "phenogroup")
+wkprops <- wkprops %>%
+  left_join(select(species2, common_name, n_sites, n_individuals, n_yrs), 
+            by = "common_name") %>%
+  rename(total_sites = n_sites,
+         total_individuals = n_individuals,
+         total_yrs = n_yrs)
+
+# Remove any weekly proportions that are based on < 5 observations (over 
+# all years, individuals)
+wkprops <- wkprops %>%
+  filter(n_obs >= 5)
+
+# Just for draft report, make a few specific changes
+# Start plots in March
+# Remove wk 52 data for flowering dogwood, since last proportion 5 weeks earlier
+wkprops <- wkprops %>%
+  filter(wk_date1 > "2024-03-01") %>%
+  filter(!(common_name == "flowering dogwood" & wk > 50))
+
+# To create figures with ticks between month labels on the x axis, need to do 
+# a little extra work. 
+  # Dates where we want month labels (15th of month)
+  x_lab <- as.Date(paste0("2024-", 1:12, "-15"))
+  # Dates where we want ticks (1st of month)
+  x_tick <- as.Date(c(paste0("2024-", 1:12, "-01"), "2024-12-31"))
+  # Will specify axis breaks & ticks at 1st and 15th of month. Make labels on
+  # the 1st black and change color of tick marks on the 15th to NA.
+
+  # Subset if LPP only monitored over part of the year
+  lpp_month1 <- month(min(wkprops$wk_date4))
+  lpp_month2 <- month(max(wkprops$wk_date4))
+  x_lab <- x_lab[month(x_lab) %in% lpp_month1:lpp_month2]
+  tickind <- which(month(x_tick) %in% lpp_month1:lpp_month2)
+  if (last(tickind) != 13) {
+    tickind <- c(tickind, 1 + last(tickind))
+  }
+  x_tick <- x_tick[tickind]
+
+  x_lab_doy <- yday(x_lab)
+  x_tick_doy <- yday(x_tick)
+  n_x_tick <- length(x_tick)
+  month_labels <- month.abb[month(x_lab)]
+
+  color_vec2 <- color_vec 
+  names(color_vec2)[5:6] <- c("Fruit", "Ripe fruit")
+  # Make green for leaves a little darker in color
+  rgb2col = function(rgbmat){
+    ProcessColumn = function(col){
+      rgb(rgbmat[1, col], 
+          rgbmat[2, col], 
+          rgbmat[3, col], 
+          maxColorValue = 255)
+    }
+    sapply(1:ncol(rgbmat), ProcessColumn)
+  }
+  darker_gr <- rgb2col(round(col2rgb(color_vec2["Leaves"]) * 0.8))
+  color_vec2["Leaves"] <- darker_gr
+
+wkprops <- wkprops %>% 
+  left_join(select(species, common_name, functional_type), 
+            by = "common_name") %>%
+  mutate(func_group = case_when(
+    functional_type %in% c("Forb", "Graminoid", 
+                           "Semi-evergreen forb", "Evergreen forb") ~
+      "Forb or grass",
+    functional_type %in% c("Evergreen conifer", "Pine") ~ "Conifer",
+    str_detect(functional_type, "broadleaf") ~ "Broadleaf",
+    .default = functional_type
+  )) %>%
+  mutate(common_name_full = paste0(common_name, " (", 
+                                   str_to_lower(functional_type), ")")) %>%
+  arrange(func_group, functional_type, common_name, .locale = "en")
+
+wkprops <- wkprops %>%
+  mutate(facet_title = paste0(common_name_full, "        [",
+                              total_sites, " sites, ", total_individuals, 
+                              " plants, ", total_yrs, " years]"))
+
+spp_list <- unique(wkprops$facet_title)
+
+# 3 species in each multi-panel plot
+nspp_per_plot <- 3
+n_plots <- ceiling(length(spp_list) / nspp_per_plot)
+
+pt_alpha <- 0.3
+
+for (i in 1:n_plots) {
+  spps <- spp_list[(i * nspp_per_plot - (nspp_per_plot - 1)):(i * nspp_per_plot)]
+  props_sub <- filter(wkprops, facet_title %in% spps)
+  
+  # Get smoothed spline for each species, phenophase
+  for (k in 1:nspp_per_plot) {
+    props <- filter(props_sub, facet_title == spps[k])
+    pg_list <- unique(props$phenogroup)
+    
+    for (j in pg_list) {
+      
+      props_pg <- props %>% filter(phenogroup == j)
+      pg_preds <- data.frame(spline(x = props_pg$wk_doy4, 
+                                    y = props_pg$prop_yes,
+                                    n = 1000)) %>%
+        mutate(y01 = if_else(y < 0, 0, y)) %>%
+        mutate(y01 = if_else(y01 > 1, 1, y01)) %>%
+        mutate(facet_title = spps[k]) %>%
+        mutate(phenogroup_f = props_pg$phenogroup_f[1])
+      
+      if (j == pg_list[1]) {
+        pg_preds_all <- pg_preds
+      } else {
+        pg_preds_all <- rbind(pg_preds_all, pg_preds)
+      }
+    }
+    if (k == 1) {
+      pg_preds_page <- pg_preds_all
+    } else {
+      pg_preds_page <- rbind(pg_preds_page, pg_preds_all)
+    }
+  }
+  
+  assign(paste0("phenophase_periods_p", i),
+         ggplot() +
+           geom_point(data = props_sub,
+                      aes(x = wk_doy4, y = prop_yes,
+                          size = n_obs, color = phenogroup_f), alpha = pt_alpha) +
+           scale_size_continuous(range = c(0.5, 4)) +
+           geom_line(data = pg_preds_page, 
+                     aes(x = x, y = y01, color = phenogroup_f)) +
+           scale_color_manual(values = color_vec2) +
+           scale_x_continuous(limits = c(min(x_tick_doy), max(x_tick_doy)),
+                              # expand = c(0, 0),
+                              breaks = c(x_lab_doy, x_tick_doy),
+                              labels = c(month_labels, rep("", n_x_tick))) +
+           scale_y_continuous(expand = c(0.04, 0.04), 
+                              breaks = seq(0, 1, by = 0.2)) +
+           facet_wrap(~ factor(facet_title, levels = spps), ncol = 1) +
+           labs(y = "Proportion of observations in phenophase", 
+                color = "", size = "No. observations") +
+           theme_bw() +
+           theme(axis.ticks.x = element_line(color = c(rep(NA, n_x_tick - 1), 
+                                                       rep("black", n_x_tick))),
+                 panel.grid.major = element_line(color = "gray95"),
+                 panel.grid.minor = element_blank(), 
+                 legend.position = "bottom",
+                 legend.box = "vertical", 
+                 # legend.box.margin = margin(t = 0, r = 0, b = 0, l = 0, unit = "mm"),
+                 legend.margin = margin(),
+                 axis.text.x = element_text(size = 9), 
+                 axis.text.y = element_text(size = 9),
+                 legend.title = element_text(size = 9),
+                 axis.title.x = element_blank()) +
+           guides(color = guide_legend(nrow = 1, byrow = TRUE)) +
+           guides(size = guide_legend(nrow = 1, byrow = TRUE))
+  )
+  # ggsave(paste0("output/phenophase-periods-spp-", lpp_short, "-", i, ".png"),
+  #        get(paste0("phenophase_periods_p", i)),
+  #        width = 6.5,
+  #        height = 7.5,
+  #        units = "in",
+  #        dpi = 600)
+}
 
