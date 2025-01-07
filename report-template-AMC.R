@@ -1428,7 +1428,7 @@ for (i in 1:nrow(func_groups_df)) {
       suppressWarnings(
         RSm <- lmer(firstyes ~ yr + (1|site_id) + (1|individual_id), data = dat)
       )
-      if (is_warning_generated(FSm)) {
+      if (is_warning_generated(RSm)) {
         RSm <- lmer(firstyes ~ yr + (1|site_id) + (1|individual_id), data = dat,
                     control = lmerControl(optimizer = "Nelder_Mead"))
         if (is_warning_generated(RSm)) {
@@ -1492,8 +1492,10 @@ for (i in 1:nrow(func_groups_df)) {
       nspp = n_distinct(dat$common_name),
       minyr = min(dat$yr),
       maxyr = max(dat$yr),
-      random_slopes = ifelse("common_name.1" %in% re_names, 
-                             "Yes", "No"),
+      random_slopes = ifelse(!"common_name.1" %in% re_names, "No", 
+                             ifelse("common_name.1" %in% re_names &
+                                      VarCorr(RSm)$common_name.1[1, 1] == 0, 
+                                    "No", "Yes")),
       random_ints = str_c(str_subset(re_names, ".1", negate = TRUE), 
                           collapse = ", "),
       beta = round(trend["Estimate"], 5),
