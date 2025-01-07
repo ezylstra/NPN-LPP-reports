@@ -91,6 +91,10 @@ si <- si %>%
 # Remove any duplicate records (all entries the same except observation_id)
 si <- si %>% distinct(across(-observation_id))
 
+# Remove any observations of 'ohi'a lehua if present (would be an error)
+si <- si %>%
+  filter(common_name != "'ohi'a lehua")
+
 # Append phenophase "groups" (csv created in phenophases-intensities.R)
 pheno_list <- read.csv("phenophases.csv")
 si <- left_join(si, select(pheno_list, phenophase_id, class_id, pheno_group),
@@ -794,9 +798,22 @@ species2 <- species2 %>%
                                              "Insect", 
                                              "Mammal",
                                              "Reptile"))) %>%
-  arrange(desc(kingdom), functional_type, common_name)
+  arrange(desc(kingdom), functional_type, common_name, .locale = "en")
 
 # write.table(species2, "clipboard", sep = "\t", row.names = FALSE)
+
+# Summary stats for plants species
+  # Total number of plants
+  (nplants <- sum(species2$n_individuals[species2$kingdom == "Plantae"]))
+  # Mean number of plants per species
+  nplants / sum(species2$kingdom == "Plantae")
+  # Mean number of observations per plant per year (mean of species means)
+  (obsperplant <- mean(species2$nobs_mn_per_yrind[species2$kingdom == "Plantae"]))
+  # Mean observation interval (mean of species means)
+  (obsinterval <- mean(species2$interval_mn_per_yrind[species2$kingdom == "Plantae"]))
+  
+# Date range within year
+  count(plant_obs2, day_of_year)
 
 #- Map(s) ---------------------------------------------------------------------#
 
