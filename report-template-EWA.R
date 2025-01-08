@@ -803,6 +803,36 @@ species3 <- species2 %>%
   arrange(desc(kingdom), functional_type, common_name, .locale = "en")
 # write.table(species3, "clipboard", sep = "\t", row.names = FALSE)
 
+# Summary stats for plants species
+  # Total number of plant species 
+  (nplantspp <- sum(species3$kingdom == "Plantae"))
+  # Total number of plants
+  (nplants <- sum(species3$n_individuals[species3$kingdom == "Plantae"]))
+  # Mean number of plants per species
+  nplants / nplantspp
+  # Number of plant species with only 1 monitored individual
+  sum(species3$n_individuals[species3$kingdom == "Plantae"] == 1)
+  # Mean number of observations per plant per year (mean of species means)
+  (obsperplant <- mean(species3$nobs_mn_per_yrind[species3$kingdom == "Plantae"]))
+  # Mean observation interval (mean of species means)
+  (obsinterval <- mean(species3$interval_mn_per_yrind[species3$kingdom == "Plantae"]))
+
+# Summary stats for animal species
+  # Total number of animal species 
+  (nanimalspp <- sum(species3$kingdom == "Animalia"))
+  # Total number of animal-site combos
+  (nanimalsites <- sum(species3$n_individuals[species3$kingdom == "Animalia"]))
+  # Mean number of sites per species
+  nanimalsites / nplantspp
+  # Mean number of observations per animal-site per year (mean of species means)
+  (obsperanimalsite <- mean(species3$nobs_mn_per_yrind[species3$kingdom == "Animalia"]))
+  # Mean observation interval (mean of species means)
+  (anobsinterval <- mean(species3$interval_mn_per_yrind[species3$kingdom == "Animalia"], 
+                         na.rm = TRUE))
+
+# Date range within year
+count(plant_obs2, day_of_year)
+
 # Create a smaller subset for report:
   # Remove plant species where only one individual observed
   # For animals, could remove species-yr-site combos when there were no detections 
@@ -859,6 +889,12 @@ species4 <- species2 %>%
   arrange(desc(kingdom), functional_type, common_name, .locale = "en") %>%
   filter(!(kingdom == "Plantae" & n_individuals == 1))
 # write.table(species4, "clipboard", sep = "\t", row.names = FALSE)
+
+# How many animal records removed in subset?
+  nrow(distinct(freq_an1, common_name, site_id, yr))
+  nrow(distinct(freq_an, common_name, site_id, yr))
+  sum(species4$kingdom == "Animalia")
+  sum(species3$kingdom == "Animalia")
 
 #- Map(s) ---------------------------------------------------------------------#
 
@@ -1460,7 +1496,7 @@ for (i in 1:nrow(func_groups_df)) {
         RSm <- lmer(firstyes ~ yr + (1|common_name) + (1|site_id) + (1|individual_id), 
                     data = dat)
       )
-      if (is_warning_generated(FSm)) {
+      if (is_warning_generated(RSm)) {
         RSm <- lmer(firstyes ~ yr + (1|common_name) + (1|site_id) + (1|individual_id), 
                     data = dat,
                     control = lmerControl(optimizer = "Nelder_Mead"))
@@ -2130,3 +2166,53 @@ for (i in 1:n_plots) {
   #        dpi = 600)
 }
 
+#- Explore animal data --------------------------------------------------------#
+
+dfa <- animal_obs2 
+
+# Remove everything but live observations, aggregate info across phenophases
+# for each species-site-date, and remove unnecessary columns
+dfa <- dfa %>%
+  filter(pheno_group == "Live observation") %>%
+  group_by(common_name, site_id, individual_id, obsdate, yr, day_of_year) %>%
+  summarize(status = max(phenophase_status), .groups = "keep") %>%
+  data.frame()
+
+# Add week to the data so we can calculate weekly proportions
+# We'll also create wk_doy columns to assign each week with a day of the year:
+# wk_doy1 = start of each week (eg, date for week 1 would be Jan 1)
+# wk_doy4 = middle of each week (eg, date for week 1 would be Jan 4)
+dfa <- dfa %>%
+  mutate(wk = week(obsdate)) %>%
+  # Remove observations in week 53
+  filter(wk < 53) %>%
+  # Create wk_doy columns
+  mutate(wk_date1 = parse_date_time(paste(2024, wk, 1, sep = "/"), "Y/W/w"),
+         wk_date1 =  as.Date(wk_date1),
+         wk_doy1 = yday(wk_date1),
+         wk_date4 = parse_date_time(paste(2024, wk, 4, sep = "/"), "Y/W/w"),
+         wk_date4 =  as.Date(wk_date4),
+         wk_doy4 = yday(wk_date4))
+
+# Keep just one observation of each plant and phenophase, each week. Sort so the 
+# most advanced phenophase gets kept (if more than one value in a week)
+dfa <- dfa %>%
+  arrange(common_name, site_id, individual_id, yr, wk, desc(status)) %>%
+  distinct(individual_id, yr, wk, .keep_all = TRUE) %>%
+  filter(!is.na(status)) 
+
+# Summarize data available across all plants, years, phenophases
+propdat_wka <- dfa %>%
+  group_by(common_name, wk) %>%
+  summarize(n_obs = n(), 
+            n_sites = n_distinct(site_id),
+            n_yrs = n_distinct(yr),
+            .groups = "keep") %>%
+  data.frame()
+propdat_wk_sppa <- propdat_wka %>%
+  group_by(common_name) %>%
+  summarize(mn_obs_per_wk = round(mean(n_obs), 1),
+            max_n_yrs = max(n_yrs),
+            max_n_sites = max(n_sites),
+            .groups = "keep") %>%
+  data.frame()
