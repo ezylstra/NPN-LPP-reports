@@ -1,7 +1,7 @@
 # ABQ BioPark Botanic Garden
 # Erin Zylstra
 # erinz@usanpn.org
-# 15 January 2026
+# 16 January 2026
 
 require(rnpn)
 require(tidyr)
@@ -205,16 +205,12 @@ si <- si %>%
 # same date can tell us about inter-observer variation (assuming phenophase 
 # status and intensity doesn't change).
 
-# For animals, multiple observations of the same species at a site on the same
-# date provides a confounded measure of inter-observer variation and variation 
-# in abundance or activity of the species throughout the day.
-
 # To summarize sampling effort (e.g., when and where observations were made), 
 # probably best to keep all the observations in the dataset.
 
-# To analyze phenophase onsets or animal activity/occurrence, probably best
+# To analyze phenophase onsets, probably best
 # to subset or aggregate observations so there is a maximum of one record for 
-# each phenophase associated with a plant/animal at a given site each day.
+# each phenophase associated with a plant each day.
 
 # Function to calculate sum, but if all values in vector = NA, then return NA
 na_max <- function(x) {
@@ -236,26 +232,6 @@ si_sub_plants <- si %>%
   arrange(common_name, individual_id, obsdate, phenophase_id, 
           desc(phenophase_status), desc(intensity)) 
 
-  # A little data exploration...
-  # For each species, there is only 1 phenophase per pheno class EXCEPT:
-  # common lilac: Open flowers (205) and Full flowering (206) both in 
-  # phenophase class 7 (Open flowers or pollen cones)
-    # phaseperclass <- si_sub_plants %>%
-    #   group_by(common_name, class_id) %>%
-    #   summarize(n_phenophases = length(unique(phenophase_id)),
-    #             .groups = "keep") %>%
-    #   data.frame()
-    # filter(phaseperclass, n_phenophases > 1)
-    # count(filter(si, common_name == "common lilac" & class_id == 7), 
-    #       phenophase_id, phenophase_description)
-    # filter(pheno_list, class_id == 7)
-  # For each species, may have more than 1-3 phenophases per pheno group
-    # si_sub_plants %>%
-    #   group_by(common_name, pheno_group) %>%
-    #   summarize(n_phenophases = length(unique(phenophase_id)),
-    #             .groups = "keep") %>%
-    #   data.frame()
-  
   # For each species, summarize number of phenophases, pheno classes, pheno 
   # groups, and observations per pheno class
     spp_pc <- si_sub_plants %>%
@@ -271,9 +247,7 @@ si_sub_plants <- si %>%
                 flower = sum(class_id == 6),
                 open_flower = sum(class_id == 7),
                 pollen = sum(class_id == 8),
-                end_flower = sum(class_id == 9),
                 fruit = sum(class_id == 10),
-                unripe = sum(class_id == 11),
                 ripe = sum(class_id == 12),
                 drop_fruit = sum(class_id == 13)) %>%
       data.frame()
@@ -294,32 +268,6 @@ si_sub_plants <- si %>%
 # Then we can start to see how often we have conflicting information from 
 # multiple observers
 
-  # A little more data exploration... 
-  # Is there just one intensity_category_id for each plant phenophase?
-    # int_cat_sp <- si_sub_plants %>%
-    #   group_by(common_name, phenophase_id, phenophase_description) %>%
-    #   summarize(int_cats = length(unique(intensity_category_id)),
-    #             .groups = "keep") %>%
-    #   data.frame()
-    # count(filter(si_sub_plants, common_name == "yellow birch", phenophase_id == "483"),
-    #       intensity_category_id) # 40, 73, or NA
-    # count(filter(si_sub_plants, common_name == "American chestnut", phenophase_id == "371"),
-    #       intensity_category_id) 
-  # No, but I think that's because the counts include intensity categories of NA
-  # and because the intensity category may have shifted over time:
-    # count(filter(si_sub_plants, common_name == "yellow birch", phenophase_id == "483"),
-    #       intensity_category_id, yr) # 40 used in 2014-2015; 73 used in 2016-2023
-    # test <- si_sub_plants %>%
-    #   group_by(individual_id, phenophase_id, yr) %>%
-    #   summarize(int_cat = length(unique(intensity_category_id[!is.na(intensity_category_id)])),
-    #             .groups = "keep") %>%
-    #   data.frame()
-    # count(test, int_cat)
-  # In a single year, only one intensity category (if any) for that plant, phenophase
-
-# All this means that we put data in wide form, with 2 columns for each 
-# plant phenophase: status, intensity
-
 # Putting data in wide form:
 # First, will remove any full flowering observations for lilac (if they're in 
 # there). Then can use phenophase class_id instead of phenophase_id because 
@@ -336,22 +284,16 @@ pheno_list <- pheno_list %>%
     class_id == 6 ~ "flower",
     class_id == 7 ~ "open_flower",
     class_id == 8 ~ "pollen",
-    class_id == 9 ~ "end_flower",
     class_id == 10 ~ "fruit",
-    class_id == 11 ~ "unripe_fruit",
     class_id == 12 ~ "ripe_fruit",
     class_id == 13 ~ "drop_fruit",
     .default = NA
   )) %>%
   mutate(group_short = case_when(
-    pheno_group == "Dead observation" ~ "dead",
-    pheno_group == "Live observation" ~ "live",
-    pheno_group == "Trapped/baited" ~ "trap",
     pheno_group == "Leaves" ~ "leaf",
     pheno_group == "Leaf senescence" ~ "leaf_end",
     pheno_group == "Flowers" ~ "flower",
     pheno_group == "Open flowers" ~ "flower_open",
-    pheno_group == "Flower senescence" ~ "flower_end",
     pheno_group == "Fruits" ~ "fruit",
     pheno_group == "Ripe fruits" ~ "fruit_ripe"
   ))
@@ -365,10 +307,10 @@ pl_pheno_classes <- pheno_list %>%
     group_short == "leaf_end" ~ "lfe",
     group_short == "flower" ~ "fl",
     group_short == "flower_open" ~ "flo",
-    group_short == "flower_end" ~ "fle",
     group_short == "fruit" ~ "fr",
     group_short == "fruit_ripe" ~ "frr"
   )) %>%
+  filter(!is.na(class_short)) %>%
   arrange(class_id) %>%
   mutate(class_id2 = str_pad(class_id, width = 2, pad = 0))
 
@@ -378,19 +320,11 @@ pheno_list <- pheno_list %>%
                                pheno_group == "Leaf senescence", 
                                "Colored leaves"))
 pgs_pl <- pheno_list %>%
-  filter(class_id %in% 1:13) %>%
+  filter(class_id %in% pl_pheno_classes$class_id) %>%
   group_by(pheno_group, class_id, class_name) %>%
   summarize(n_phenophases = n(), .groups = "keep") %>%
   data.frame() %>%
   arrange(class_id)
-pgs_an <- pheno_list %>%
-  filter(!class_id %in% 1:13) %>%
-  group_by(pheno_group) %>%
-  summarize(n_classes = n_distinct(class_name),
-            n_phenophases = n()) %>%
-  data.frame()
-# write.table(pgs_pl, "clipboard", sep = "\t", row.names = FALSE)
-# write.table(pgs_an, "clipboard", sep = "\t", row.names = FALSE)
 
 # Put in wide form
 plant_obs <- si_sub_plants %>%
@@ -426,7 +360,6 @@ plant_obs <- plant_obs %>%
   # If color leaves = 1, leaves = 1
   # If open flower = 1, flower = 1
   # If pollen = 1, flower = 1
-  # If unripe fruit = 1, fruit = 1
   # If ripe fruit = 1, fruit = 1
 # For now, leaving instances where more specific category = 1 and general
 # category (leaves, flower, fruit) = NA
@@ -444,12 +377,11 @@ plant_obs <- plant_obs %>%
               all_of(paste0("intensity_", pl_pheno_classes$class_id2)))  
 
 # First, see how often these issues come up?
-  # count(plant_obs, status_young_leaf, status_leaf)
-  # count(plant_obs, status_color_leaf, status_leaf)
-  # count(plant_obs, status_open_flower, status_flower)
-  # count(plant_obs, status_pollen, status_flower)
-  # count(plant_obs, status_unripe_fruit, status_fruit)
-  # count(plant_obs, status_ripe_fruit, status_fruit)
+  count(plant_obs, status_young_leaf, status_leaf)
+  count(plant_obs, status_color_leaf, status_leaf)
+  count(plant_obs, status_open_flower, status_flower)
+  count(plant_obs, status_pollen, status_flower)
+  count(plant_obs, status_ripe_fruit, status_fruit)
 
 # Replace values where needed
 plant_obs <- plant_obs %>%
@@ -464,7 +396,6 @@ plant_obs <- plant_obs %>%
     .default = status_flower
   )) %>%
   mutate(status_fruit = case_when(
-    (status_unripe_fruit == 1 & status_fruit == 0) ~ 1,
     (status_ripe_fruit == 1 & status_fruit == 0) ~ 1, 
     .default = status_fruit
   ))
@@ -587,10 +518,6 @@ sitest_sub <- sitest %>%
 
 # write.table(sitest_sub, "clipboard", sep = "\t", row.names = FALSE)
 
-# Table with the number of observations per year?
-# Or maybe a figure, with total observations per year, and a few smaller lines 
-# for particular sites (or species) of interest?
-
 #- Table: Yearly summaries ----------------------------------------------------#
 
 # No. of sites, No. of observers, no. plant observations by year
@@ -659,19 +586,11 @@ freqs <- freqs_pl %>%
 species2 <- species2 %>%
   left_join(freqs, by = "common_name") %>%
   mutate(functional_type = factor(functional_type, 
-                                  levels = c("Deciduous broadleaf",
+                                  levels = c("Cactus",
+                                             "Deciduous broadleaf",
+                                             "Drought deciduous broadleaf",
                                              "Evergreen broadleaf",
-                                             "Evergreen conifer",
-                                             "Pine",
-                                             "Evergreen forb",
-                                             "Forb",
-                                             "Semi-evergreen forb",
-                                             "Graminoid",
-                                             "Amphibian",
-                                             "Bird",
-                                             "Insect", 
-                                             "Mammal",
-                                             "Reptile"))) %>%
+                                             "Forb"))) %>%
   arrange(desc(kingdom), functional_type, common_name, .locale = "en")
 
 # write.table(species2, "clipboard", sep = "\t", row.names = FALSE)
@@ -689,140 +608,24 @@ species2 <- species2 %>%
 # Date range within year
   count(plant_obs2, day_of_year)
 
-##### PICK UP HERE #############################################################  
-  
-  
-  
 #- Map(s) ---------------------------------------------------------------------#
 
-# Should be options if there's one site, 1-9 sites, 10 or more sites
-
-# Might also be options we could turn on or off (eg, color gradiation depending
-# on the number of years or observations, inset map if a subset are in very
-# close proximity)
-
-# For now, see start in site-maps.R
-
-#- Download and process climate data ------------------------------------------#
-
-# Download in download-daymet.R
-
-# Load climate data
-daymet_csv <- paste0("climate-data/daymet-", lpp_short,  
-                     "-thru", max(all_yrs), ".csv")
-daymet_zip <- str_replace(daymet_csv, ".csv", ".zip")
-unzip(daymet_zip)
-clim_full <- read.csv(daymet_csv)
-file.remove(daymet_csv)
-
-# Summarize data for each season (as defined previously by NPN)
-  # Spring = Mar-May
-  # Summer = Jun-Aug
-  # Fall = Sep-Nov
-  # Winter = Dec-Feb (assigned to year for Jan-Feb)
-
-# Just summarize for temperature, precipitation
-clims <- clim_full %>%
-  select(-c(daylength_s, rad_Wm2, vp_Pa, swe_kgm2))
-
-# Assign "seasonyr" (so Dec is associated with Jan, Feb in next calendar year)
-clims <- clims %>%
-  mutate(date = ymd(date)) %>%
-  mutate(seasonyr = if_else(mon == 12, year + 1, year))
-
-# Remove winter seasons where we don't have data from all months and add a 
-# season label
-clims <- clims %>%
-  # Remove data from Jan-Feb in first year with climate data
-  filter(!(seasonyr == min(seasonyr) & mon %in% 1:2)) %>%
-  # Remove data from Dec in last year with climate data
-  filter(seasonyr != max(seasonyr)) %>%
-  # Season labels
-  mutate(season = case_when(
-    mon %in% 3:5 ~ "spring",
-    mon %in% 6:8 ~ "summer",
-    mon %in% 9:11 ~ "fall",
-    .default = "winter"
-  )) %>%
-  mutate(season = factor(season, 
-                         levels = c("winter", "spring", "summer", "fall")))
-
-# Calculate mean daily temperatures
-clims <- clims %>%
-  mutate(tmean_c = round((tmax_c + tmin_c) / 2, 2))
-
-# Summarize data by season (accumulated precip, mean tmin, tmean, tmax)
-clims <- clims %>%
-  group_by(site, seasonyr, season) %>%
-  summarize(prcp = sum(prcp_mm),
-            tmin = mean(tmin_c),
-            tmean = mean(tmean_c),
-            tmax = mean(tmax_c),
-            .groups = "keep") %>%
-  data.frame()
-
-#- Explore site locations -----------------------------------------------------#
-
-# Wondering whether any/all sites could be aggregated for summarizing and 
-# analyzing the data. For the moment, won't worry about filtering by the number 
-# of species or observations.
-
-# Could do this by evaluating the distances between locations
-# Could also do this by looking at climate data
-
-# # Start by calculating pairwise distances
-# sitesll <- sites %>%
-#   rename(lon = longitude, lat = latitude) %>%
-#   vect(geom = c("lon", "lat"), crs = "epsg:4326")
-# dist.matrix <- geosphere::distm(as.matrix(sites[, c("longitude", "latitude")]))
-# 
-# # Cluster analysis (using medoids/k-means)?
-# # Alternatively, could use cluster or apcluster packages...
-# pamk.best <- fpc::pamk(sites[, c("longitude", "latitude")])
-# # pamk.best$nc = optimal number of clusters
-# # pamk.best$pamobject$clustering = cluster IDs
-# Clusters <- factor(pamk.best$pamobject$cluster)
-# ggplot() +
-#   geom_point(data = sites, aes(x = longitude, y = latitude, 
-#                               color = Clusters),
-#              alpha = 0.3, size = 2.5)
-# 
-# # Differences in climate among sites
-# clims_c <- clims %>%
-#   group_by(site, season) %>%
-#   summarize(prcp = mean(prcp),
-#             tmin = mean(tmin),
-#             tmean = mean(tmean),
-#             tmax = mean(tmax),
-#             .groups = "keep") %>%
-#   pivot_wider(id_cols = site,
-#               names_from = season,
-#               values_from = c(prcp, tmin, tmean, tmax)) %>%
-#   data.frame() %>%
-#   mutate(across(prcp_winter:tmax_fall, ~scale(.x)[, 1]))
-# pamk.best.c <- fpc::pamk(clims_c[, -1])
-# Clusters.c <- factor(pamk.best.c$pamobject$cluster)
-# ggplot() +
-#   geom_point(data = sites, aes(x = longitude, y = latitude, 
-#                                color = Clusters.c),
-#              alpha = 0.3, size = 2.5)
-# 
-# # Pausing this for now.
-# rm(clims_c)
+# Go to site-maps.R
 
 #- Aggregate status information within phenophase group -----------------------#
 
+# Create table summarizing phenophase class groups
+count(si, class_id, pheno_group, phenophase_description) %>%
+  left_join(distinct(pheno_list, class_id, class_name))
+  
 # Aggregate status information within pheno group (doesn't make sense to 
 # aggregate intensity values, since they may not always be the same type)
-
-# For now, will use 7 phenophase groups for plants
 
 # Create new data frame without intensity data and other data summaries
 plg_status <- plant_obs2 %>% 
   select(-c(contains("intens"), "n_status", "n_yes", "n_observations"))
 
 # Aggregate information across classes within each pheno group
-# TODO: make this easier by putting things into long form first?
 for (group in unique(pl_pheno_classes$group_code)) {
   cols <- pl_pheno_classes$stat_cols_c[pl_pheno_classes$group_code == group]
   plg_status[,paste0("sum_", group)] <- apply(as.matrix(plg_status[,cols]), 
@@ -834,8 +637,121 @@ colnames(plg_status) <- str_replace(colnames(plg_status), "sum", "status")
 
 #- Decide on calendar vs water year -------------------------------------------#
 
-# Identify whether we want to evaluate onset dates within a calendar year
-# or within a water year (1 Oct - 30 Sep)
+# Summarize data by week (across years)
+status_wk <- plg_status %>%
+  mutate(wk = week(obsdate)) %>%
+  group_by(common_name, wk) %>%
+  summarize(nyrs = n_distinct(yr),
+            nobs_lf = sum(!is.na(status_lf)),
+            prop_lf = sum(status_lf, na.rm = TRUE)/sum(!is.na(status_lf)),
+            nobs_lfe = sum(!is.na(status_lfe)),
+            prop_lfe = sum(status_lfe, na.rm = TRUE)/sum(!is.na(status_lfe)),
+            nobs_fl = sum(!is.na(status_fl)),
+            prop_fl = sum(status_fl, na.rm = TRUE)/sum(!is.na(status_fl)),
+            nobs_flo = sum(!is.na(status_flo)),
+            prop_flo = sum(status_flo, na.rm = TRUE)/sum(!is.na(status_flo)),
+            nobs_fr = sum(!is.na(status_fr)),
+            prop_fr = sum(status_fr, na.rm = TRUE)/sum(!is.na(status_fr)),
+            nobs_frr = sum(!is.na(status_frr)),
+            prop_frr = sum(status_frr, na.rm = TRUE)/sum(!is.na(status_frr)),
+            .groups = "keep") %>%
+  data.frame()
+
+# Put into long form and remove spp-phpg with no observations
+status_wk_nobs <- status_wk %>%
+  select(-contains("prop")) %>%
+  pivot_longer(cols = contains("nobs"), 
+               names_to = "phpg",
+               values_to = "nobs") %>%
+  data.frame() %>%
+  mutate(phpg = str_remove(phpg, "nobs_"))
+status_wk_prop <- status_wk %>%
+  select(-contains("nobs")) %>%
+  pivot_longer(cols = contains("prop"), 
+               names_to = "phpg",
+               values_to = "prop") %>%
+  data.frame() %>%
+  mutate(phpg = str_remove(phpg, "prop_"))
+status_wk <- status_wk_nobs %>%
+  left_join(status_wk_prop, by = c("common_name", "wk" ,"nyrs", "phpg")) %>%
+  filter(nobs > 0) %>%
+  group_by(common_name, phpg) %>%
+  mutate(nyrs_max = max(nyrs)) %>%
+  ungroup() %>%
+  data.frame()
+
+# Look at weekly proportions in phase to see whether we want to evaluate onset 
+# dates within a calendar year or within a water year (1 Oct - 30 Sep).
+# Note: Oct 1 in week 40
+
+# Leaves
+ggplot(filter(status_wk, phpg == "lf" & nyrs_max > 2), 
+       aes(x = wk, y = prop)) +
+  geom_line() + 
+  geom_point(aes(size = nobs)) +
+  facet_wrap(~common_name, ncol = 2) +
+  geom_vline(xintercept = 40, color = "steelblue3") +
+  labs(title = "Leaves")
+# Leaf end
+ggplot(filter(status_wk, phpg == "lfe" & nyrs_max > 2), 
+       aes(x = wk, y = prop)) +
+  geom_line() + 
+  geom_point(aes(size = nobs)) +
+  facet_wrap(~common_name, ncol = 2) +
+  geom_vline(xintercept = 40, color = "steelblue3") +
+  labs(title = "Leaf end")
+# Flower
+ggplot(filter(status_wk, phpg == "fl" & nyrs_max > 2), 
+       aes(x = wk, y = prop)) +
+  geom_line() + 
+  geom_point(aes(size = nobs)) +
+  facet_wrap(~common_name, ncol = 2) +
+  geom_vline(xintercept = 40, color = "steelblue3") +
+  labs(title = "Flowers")
+# Flower open
+ggplot(filter(status_wk, phpg == "flo" & nyrs_max > 2), 
+       aes(x = wk, y = prop)) +
+  geom_line() + 
+  geom_point(aes(size = nobs)) +
+  facet_wrap(~common_name, ncol = 2) +
+  geom_vline(xintercept = 40, color = "steelblue3") +
+  labs(title = "Flowers open")
+# Fruit
+ggplot(filter(status_wk, phpg == "fr" & nyrs_max > 2), 
+       aes(x = wk, y = prop)) +
+  geom_line() + 
+  geom_point(aes(size = nobs)) +
+  facet_wrap(~common_name, ncol = 2) +
+  geom_vline(xintercept = 40, color = "steelblue3") +
+  labs(title = "Fruit")
+# Fruit ripe
+ggplot(filter(status_wk, phpg == "frr" & nyrs_max > 2), 
+       aes(x = wk, y = prop)) +
+  geom_line() + 
+  geom_point(aes(size = nobs)) +
+  facet_wrap(~common_name, ncol = 2) +
+  geom_vline(xintercept = 40, color = "steelblue3") +
+  labs(title = "Fruit ripe")
+
+# Leaves: calendar looks fine (some with leaves all yr: saltbush, rabbitbrush)
+# Leaf end: calendar looks fine (rabbitbrush low values all year)
+# Flowers: calendar looks better than water EXCEPT for Siberian elm, which 
+  # starts at very end of year
+# Flowers open: calendar looks fine
+
+# Fruit: 
+  # calendar best for cottonwood, currant, Siberian elm
+  # 3 species have inverse patterns (high most of year with dip mid-year):
+    # saltbush, mesquite, cholla. calendar year would work here.
+  # 2 species that have similar leaves all year: horsetail milkweed (0), 
+    # stretchberry (~ 0.25)
+  # summer year best for rabbitbush, with 0's only ~ wks 25-38
+  # showy milkweed has 0's in weeks 10-20....
+# Fruit ripe similarly mixed... 
+
+# PICK UP HERE..... ############################################################
+
+
 water_year <- FALSE
 
 # if we're using water year, create new yr and doy columns
@@ -1740,5 +1656,66 @@ for (i in 1:n_plots) {
   #        units = "in",
   #        dpi = 600)
 }
+
+
+
+
+#- Download and process climate data ------------------------------------------#
+
+# Download in download-daymet.R
+
+# Load climate data
+daymet_csv <- paste0("climate-data/daymet-", lpp_short,  
+                     "-thru", max(all_yrs), ".csv")
+daymet_zip <- str_replace(daymet_csv, ".csv", ".zip")
+unzip(daymet_zip)
+clim_full <- read.csv(daymet_csv)
+file.remove(daymet_csv)
+
+# Summarize data for each season (as defined previously by NPN)
+# Spring = Mar-May
+# Summer = Jun-Aug
+# Fall = Sep-Nov
+# Winter = Dec-Feb (assigned to year for Jan-Feb)
+
+# Just summarize for temperature, precipitation
+clims <- clim_full %>%
+  select(-c(daylength_s, rad_Wm2, vp_Pa, swe_kgm2))
+
+# Assign "seasonyr" (so Dec is associated with Jan, Feb in next calendar year)
+clims <- clims %>%
+  mutate(date = ymd(date)) %>%
+  mutate(seasonyr = if_else(mon == 12, year + 1, year))
+
+# Remove winter seasons where we don't have data from all months and add a 
+# season label
+clims <- clims %>%
+  # Remove data from Jan-Feb in first year with climate data
+  filter(!(seasonyr == min(seasonyr) & mon %in% 1:2)) %>%
+  # Remove data from Dec in last year with climate data
+  filter(seasonyr != max(seasonyr)) %>%
+  # Season labels
+  mutate(season = case_when(
+    mon %in% 3:5 ~ "spring",
+    mon %in% 6:8 ~ "summer",
+    mon %in% 9:11 ~ "fall",
+    .default = "winter"
+  )) %>%
+  mutate(season = factor(season, 
+                         levels = c("winter", "spring", "summer", "fall")))
+
+# Calculate mean daily temperatures
+clims <- clims %>%
+  mutate(tmean_c = round((tmax_c + tmin_c) / 2, 2))
+
+# Summarize data by season (accumulated precip, mean tmin, tmean, tmax)
+clims <- clims %>%
+  group_by(site, seasonyr, season) %>%
+  summarize(prcp = sum(prcp_mm),
+            tmin = mean(tmin_c),
+            tmean = mean(tmean_c),
+            tmax = mean(tmax_c),
+            .groups = "keep") %>%
+  data.frame()
 
   

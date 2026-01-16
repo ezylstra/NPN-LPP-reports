@@ -3,13 +3,14 @@ library(tmaptools)
 
 xextend <- 1.0 # 0.3 for AMC, 1 for EWA
 yextend <- 0.3
+# For ABQ, use 60 extend values for x and y
 bb <- ggmap::make_bbox(lon = longitude, lat = latitude, data = sites, 
                        f = c(xextend, yextend))
 
 # Map type, best options I identified below:
-  # alidade_smooth (grayscale)
-  # outdoors (nice with color = "bw")
-  # stamen_terrain
+# alidade_smooth (grayscale)
+# outdoors (nice with color = "bw")
+# stamen_terrain
 maptype <- "outdoors"
 # Map color (bw or color)
 mapcol <- "bw"
@@ -92,4 +93,3 @@ tm_shape(coords) + tm_dots(size = 0.4,
                            fill = "blue",
                            fill_alpha = 0.5)
 tmap_mode("plot")
-
