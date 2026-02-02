@@ -1102,12 +1102,12 @@ df2 <- df %>%
           axis.text.y = element_text(size = 9),
           strip.text = element_text(size = 9))
   
-  ggsave("output/onsets-plot-abq-trch.png",
-         boxplot_trch,
-         width = 6.5,
-         height = 1.3,
-         units = "in",
-         dpi = 600)
+  # ggsave("output/onsets-plot-abq-trch.png",
+  #        boxplot_trch,
+  #        width = 6.5,
+  #        height = 1.3,
+  #        units = "in",
+  #        dpi = 600)
 
 # eastern cottonwood --------------------------------------#
   # using Jan-Dec
@@ -1180,12 +1180,12 @@ df2 <- df %>%
           axis.text.y = element_text(size = 9),
           strip.text = element_text(size = 9))
   
-  ggsave("output/onsets-plot-abq-eaco.png",
-         boxplot_eaco,
-         width = 6.5,
-         height = 2.5,
-         units = "in",
-         dpi = 600)
+  # ggsave("output/onsets-plot-abq-eaco.png",
+  #        boxplot_eaco,
+  #        width = 6.5,
+  #        height = 2.5,
+  #        units = "in",
+  #        dpi = 600)
 
 # golden currant -----#
   # using Jan-Dec
@@ -1258,12 +1258,12 @@ df2 <- df %>%
           axis.text.y = element_text(size = 9),
           strip.text = element_text(size = 9))
   
-  ggsave("output/onsets-plot-abq-gocu.png",
-         boxplot_gocu,
-         width = 6.5,
-         height = 2.5,
-         units = "in",
-         dpi = 600)
+  # ggsave("output/onsets-plot-abq-gocu.png",
+  #        boxplot_gocu,
+  #        width = 6.5,
+  #        height = 2.5,
+  #        units = "in",
+  #        dpi = 600)
 
 # Siberian elm -----#
   # Plot Oct - next Dec, for colored leaves, start in year 2
@@ -1362,12 +1362,12 @@ df2 <- df %>%
           axis.text.y = element_text(size = 9),
           strip.text = element_text(size = 9))
   
-  ggsave("output/onsets-plot-abq-siel.png",
-         boxplot_siel,
-         width = 6.5,
-         height = 2.5,
-         units = "in",
-         dpi = 600)
+  # ggsave("output/onsets-plot-abq-siel.png",
+  #        boxplot_siel,
+  #        width = 6.5,
+  #        height = 2.5,
+  #        units = "in",
+  #        dpi = 600)
 
 # rubber rabitbrush -----#
   # using Jan-Dec for fruits
@@ -1461,12 +1461,12 @@ df2 <- df %>%
           axis.text.y = element_text(size = 9),
           strip.text = element_text(size = 9))
   
-  ggsave("output/onsets-plot-abq-rura.png",
-         boxplot_rura,
-         width = 6.5,
-         height = 1.9,
-         units = "in",
-         dpi = 600)
+  # ggsave("output/onsets-plot-abq-rura.png",
+  #        boxplot_rura,
+  #        width = 6.5,
+  #        height = 1.9,
+  #        units = "in",
+  #        dpi = 600)
 
 # screwbean mesquite -----#
   # using Jan-Dec for most
@@ -1558,12 +1558,12 @@ df2 <- df %>%
           axis.text.y = element_text(size = 9),
           strip.text = element_text(size = 9))
   
-  ggsave("output/onsets-plot-abq-scme.png",
-         boxplot_scme,
-         width = 6.5,
-         height = 2.2,
-         units = "in",
-         dpi = 600)
+  # ggsave("output/onsets-plot-abq-scme.png",
+  #        boxplot_scme,
+  #        width = 6.5,
+  #        height = 2.2,
+  #        units = "in",
+  #        dpi = 600)
 
 # stretchberry -----#
   # using Jan-Dec, but not fruit (no signal)
@@ -1635,12 +1635,12 @@ df2 <- df %>%
           axis.text.y = element_text(size = 9),
           strip.text = element_text(size = 9))
   
-  ggsave("output/onsets-plot-abq-stbe.png",
-         boxplot_stbe,
-         width = 6.5,
-         height = 1.9,
-         units = "in",
-         dpi = 600)
+  # ggsave("output/onsets-plot-abq-stbe.png",
+  #        boxplot_stbe,
+  #        width = 6.5,
+  #        height = 1.9,
+  #        units = "in",
+  #        dpi = 600)
 
 # fourwing saltbush -----#
   # using Jan-Dec for flowers
@@ -1731,12 +1731,12 @@ df2 <- df %>%
           axis.text.y = element_text(size = 9),
           strip.text = element_text(size = 9))
   
-  ggsave("output/onsets-plot-abq-fwsa.png",
-         boxplot_fwsa,
-         width = 6.5,
-         height = 1.6,
-         units = "in",
-         dpi = 600)
+  # ggsave("output/onsets-plot-abq-fwsa.png",
+  #        boxplot_fwsa,
+  #        width = 6.5,
+  #        height = 1.6,
+  #        units = "in",
+  #        dpi = 600)
 
 # horsetail milkweed -----#
 # Not enough data on most phenophases
@@ -1834,12 +1834,12 @@ php_match <- eaco_gr %>%
           axis.text.y = element_text(size = text_size),
           strip.text = element_text(size = text_size),
           axis.title.y = element_text(size = text_size + 1))
-    ggsave("output/trends-plot-abq-eaco.png",
-           trends_eaco,
-           width = 6.5,
-           height = 6.5,
-           units = "in",
-           dpi = 600)
+    # ggsave("output/trends-plot-abq-eaco.png",
+    #        trends_eaco,
+    #        width = 6.5,
+    #        height = 6.5,
+    #        units = "in",
+    #        dpi = 600)
   
 # Fourwing saltbush
   # For ripe fruits, we only considered first yeses that occurred in the second 
@@ -1917,13 +1917,97 @@ php_match <- eaco_gr %>%
           axis.text.y = element_text(size = text_size),
           strip.text = element_text(size = text_size),
           axis.title.y = element_text(size = text_size + 1))
-  ggsave("output/trends-plot-abq-fwsa.png",
-         trends_fwsa,
-         width = 6.5,
-         height = 3.25,
-         units = "in",
-         dpi = 600)
+  # ggsave("output/trends-plot-abq-fwsa.png",
+  #        trends_fwsa,
+  #        width = 6.5,
+  #        height = 3.25,
+  #        units = "in",
+  #        dpi = 600)
   
-# Stretchberry ########## PICK UP HERE
+# Stretchberry
+  # Going to restrict first yeses for leaves to the 1st half of year. 
+  # Restrict first yeses for colored leaves to second half of year.
+  trenddf <- stbe_gr %>%
+    filter(!(phenogroup == "lf" & first_yes_doy > 182)) %>%
+    filter(!(phenogroup == "lfe" & first_yes_doy < 183)) %>%
+    mutate(yr0 = yr - min(yr))
+
+  # Model with separate trend for each phenophase, random slopes by individual
+  m <- lmer(first_yes_doy ~ yr0 * phenogroup + (1|individual_id), data = trenddf)
+  summary(m)
+  # Get trends for each phenophase
+  slopes <- emtrends(m, ~ phenogroup, var = "yr0") %>% 
+    data.frame() %>%
+    mutate(slope = sprintf("%.2f", round(yr0.trend, 2)),
+           lower = sprintf("%.2f", round(lower.CL, 2)),
+           upper = sprintf("%.2f", round(upper.CL, 2)))
+  ann_text <- slopes %>%
+    select(phenogroup, slope, upper, lower) %>%
+    left_join(php_match, by = "phenogroup") %>%
+    mutate(label = paste0("slope = ", slope, " (", lower, ", ", upper, ")"))
+  
+  preds <- data.frame(predict_response(m, terms = c("yr0", "phenogroup"))) %>%
+    mutate(common_name = "eastern cottonwood") %>%
+    rename(yr0 = x, phenogroup = group) %>%
+    mutate(yr = yr0 + min(trenddf$yr)) %>%
+    left_join(php_match, by = "phenogroup") %>%
+    mutate(season = ifelse(phenogroup == "lfe", "Late season", "Early season"))
+  
+  # Remove years with no observations
+  phpdat <- trenddf %>%
+    group_by(phenogroup) %>%
+    summarize(minyr = min(yr),
+              maxyr = max(yr)) %>%
+    data.frame() 
+  for (php in phpdat$phenogroup) {
+    preds$predicted[preds$phenogroup == php & preds$yr < phpdat$minyr[phpdat$phenogroup == php]] <- NA 
+    preds$conf.low[preds$phenogroup == php & preds$yr < phpdat$minyr[phpdat$phenogroup == php]] <- NA 
+    preds$conf.high[preds$phenogroup == php & preds$yr < phpdat$minyr[phpdat$phenogroup == php]] <- NA
+    preds$std.error[preds$phenogroup == php & preds$yr < phpdat$minyr[phpdat$phenogroup == php]] <- NA 
+    preds$predicted[preds$phenogroup == php & preds$yr > phpdat$maxyr[phpdat$phenogroup == php]] <- NA 
+    preds$conf.low[preds$phenogroup == php & preds$yr > phpdat$maxyr[phpdat$phenogroup == php]] <- NA 
+    preds$conf.high[preds$phenogroup == php & preds$yr > phpdat$maxyr[phpdat$phenogroup == php]] <- NA 
+    preds$std.error[preds$phenogroup == php & preds$yr > phpdat$maxyr[phpdat$phenogroup == php]] <- NA 
+  }
+  
+  text_size <- 8
+  ci_alpha <- 0.17
+  
+  trends_stbe <- ggplot(data = preds, aes(x = yr, y = predicted)) +
+    geom_line(aes(col = group_levels)) +
+    geom_ribbon(aes(ymin = conf.low, ymax = conf.high, fill = group_levels), 
+                alpha = ci_alpha) +
+    geom_point(data = trenddf,
+               aes(x = yr, y = first_yes_doy, color = factor(individual_id)),
+               position = position_dodge(width = 0.3),
+               size = 0.8, alpha = 0.5) +
+    facet_wrap(~ group_levels, scales = "free_y") +
+    scale_fill_manual(values = color_vec) +
+    scale_color_manual(values = color_vec) +
+    scale_x_continuous(breaks = seq(2016, 2024, by = 4)) +
+    geom_abs_text(data = ann_text,
+                  aes(xpos = 0.95, ypos = 0.97, label = label, hjust = 1, vjust = 1,
+                      family = "sans", x = NULL, y = NULL), size = text_size/.pt) +
+    labs(x = "Year",
+         y = "First observation day of year", 
+         color = "Phenophase",
+         fill = "Phenophase") +
+    theme_bw() +
+    theme(axis.title.x = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(), 
+          legend.position = "none",
+          axis.text.x = element_text(size = text_size), 
+          axis.text.y = element_text(size = text_size),
+          strip.text = element_text(size = text_size),
+          axis.title.y = element_text(size = text_size + 1))
+  # ggsave("output/trends-plot-abq-stbe.png",
+  #        trends_stbe,
+  #        width = 6.5,
+  #        height = 6.5,
+  #        units = "in",
+  #        dpi = 600)
+  
+# Climate effects??
   
   
