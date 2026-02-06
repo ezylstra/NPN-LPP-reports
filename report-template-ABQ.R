@@ -1,7 +1,7 @@
 # ABQ BioPark Botanic Garden
 # Erin Zylstra
 # erinz@usanpn.org
-# 30 January 2026
+# 5 Feb 2026
 
 require(rnpn)
 require(tidyr)
@@ -13,7 +13,7 @@ require(ggforce) # Nice facet options for ggplot
 require(terra)
 require(lme4)
 require(ggeffects) # Predictions & plotting for mixed-effect models
-library(emmeans)
+require(emmeans)
 # require(lmerTest) # Don't want to load this (but will call in script)
 
 source("geom_abs_text.R")
@@ -2008,6 +2008,663 @@ php_match <- eaco_gr %>%
   #        units = "in",
   #        dpi = 600)
   
-# Climate effects??
+# Climate data ----------------------------------------------------------------#
+
+# Since we just need data from one site, it's quickest to grab data from PRISM's
+# online webservice: https://prism.oregonstate.edu/explorer/
   
+# Not going to do any GDD calculations for this. Keeping it simple with monthly
+# or seasonal summaries (mean temps, cumulative precipitation). Historically,
+# NPN has summarized data over 3-month periods: winter (DJF), spring (MAM),
+# summer (JJA), fall (SON).
   
+# Using this location:
+mean(sites$latitude) # 35.09592
+mean(sites$longitude) # -106.685
+# In WGS84 (epsg:4326)
+
+# Date range
+min(yearst$yr) - 1
+max(yearst$yr)
+# 2013-2025
+
+# Load climate data (precip in mm, temps in degC)
+clim_file <- list.files("climate-data", pattern = ".csv", full.names = TRUE)
+clim <- read.csv(clim_file, 
+                 skip = 11,
+                 header = FALSE,
+                 col.names = c("yr_mon", "ppt", "tmin", "tmean", "tmax"))
+
+# Format climate data
+clim <- clim %>%
+  mutate(yr = as.numeric(str_sub(yr_mon, 1, 4)),
+         mon = as.numeric(str_sub(yr_mon, 6, 7))) %>%
+  select(-yr_mon) %>%
+  mutate(season = case_when(
+    mon %in% c(12, 1:2) ~ "wi",
+    mon %in% 3:5 ~ "sp",
+    mon %in% 6:8 ~ "su",
+    mon %in% 9:11 ~ "fa"
+  )) %>%
+  # Create plantyr variable, which will be used to match up climate data with
+  # spring phenology. So, summer/fall/winter will be associated with spring
+  # phenology data in the next calendar year.
+  mutate(plantyr = ifelse(mon %in% 6:12, yr + 1, yr))
+
+# Summarize by season
+climm <- clim %>%
+  group_by(plantyr, season) %>%
+  summarize(ppt_sum = sum(ppt),
+            tmin_mn = mean(tmin),
+            tmax_mn = mean(tmax),
+            tmean_mn = mean(tmean),
+            .groups = "keep") %>%
+  data.frame() %>%
+  filter(plantyr %in% 2014:2025)
+# climm %>% arrange(season, plantyr)
+
+climm %>%
+  pivot_longer(
+    cols = ppt_sum:tmean_mn,
+    names_to = "variable",
+    values_to = "value"
+  ) %>%
+  ggplot(aes(x = plantyr, y = value)) +
+  geom_line() +
+  geom_point() + 
+  facet_wrap(variable ~ season, scales = "free_y")
+
+# Create wide dataframe for spring phenology
+# Just using daily mean temps for now
+climm_sp <- climm %>%
+  filter(season %in% c("su", "fa", "wi")) %>%
+  select(plantyr, season, ppt_sum, tmean_mn) %>%
+  rename(ppt = ppt_sum,
+         tmean = tmean_mn,
+         yr = plantyr) %>%
+  pivot_wider(id_cols = "yr",
+              names_from = "season", 
+              values_from =c("ppt", "tmean")) %>%
+  data.frame()
+
+# Climate effects on spring phenology in eastern cottonwood -------------------#
+
+# Important note: for flowering, there are only first yes dates for 3 trees
+# because 2 trees never had positive observations! And there are only 9 years
+# observations (2015:2019, 2021, 2023:2025)
+  # si %>% 
+  #   filter(common_name == "eastern cottonwood" & pheno_group == "Flowers") %>% 
+  #   count(individual_id, phenophase_status)
+
+# For leaves, 5 trees (though one only had 2 years, and 12 years of obs)
+
+eaco <- eaco_gr %>%
+  filter(phenogroup %in% c("fl", "flo", "lf")) %>%
+  mutate(yr0 = yr - min(yr)) %>%
+  left_join(climm_sp, by = "yr") %>%
+  data.frame() %>%
+  mutate(ppt6 = ppt_fa + ppt_wi,
+         ppt9 = ppt6 + ppt_su) %>%
+  mutate(individual_id = factor(individual_id))
+  
+# Flowers models (if including individual effects, make them fixed)
+m_tempwi_fl <- lm(first_yes_doy ~ tmean_wi + individual_id,
+               data = filter(eaco, phenogroup == "fl"))
+summary(m_tempwi_fl)
+m_tempfa_fl <- lm(first_yes_doy ~ tmean_fa + individual_id,
+               data = filter(eaco, phenogroup == "fl"))
+summary(m_tempfa_fl)
+m_tempsu_fl <- lm(first_yes_doy ~ tmean_su + individual_id,
+               data = filter(eaco, phenogroup == "fl"))
+summary(m_tempsu_fl)
+
+m_pptwi_fl <- lm(first_yes_doy ~ ppt_wi + individual_id,
+               data = filter(eaco, phenogroup == "fl"))
+summary(m_pptwi_fl)
+m_ppt6_fl <- lm(first_yes_doy ~ ppt6 + individual_id,
+              data = filter(eaco, phenogroup == "fl"))
+summary(m_ppt6_fl)
+m_ppt9_fl <- lm(first_yes_doy ~ ppt9 + individual_id,
+              data = filter(eaco, phenogroup == "fl"))
+summary(m_ppt9_fl)
+# Nothing close to significant
+
+
+# Open flowers models (if including individual effects, make them fixed)
+m_tempwi_flo <- lm(first_yes_doy ~ tmean_wi + individual_id,
+               data = filter(eaco, phenogroup == "flo"))
+summary(m_tempwi_flo)
+m_tempfa_flo <- lm(first_yes_doy ~ tmean_fa + individual_id,
+               data = filter(eaco, phenogroup == "flo"))
+summary(m_tempfa_flo)
+m_tempsu_flo <- lm(first_yes_doy ~ tmean_su + individual_id,
+               data = filter(eaco, phenogroup == "flo"))
+summary(m_tempsu_flo)
+
+m_pptwi_flo <- lm(first_yes_doy ~ ppt_wi + individual_id,
+              data = filter(eaco, phenogroup == "flo"))
+summary(m_pptwi_flo)
+m_ppt6_flo <- lm(first_yes_doy ~ ppt6 + individual_id,
+             data = filter(eaco, phenogroup == "flo"))
+summary(m_ppt6_flo) # Negative relationship between 6-month precip and open flower onset
+m_ppt9_flo <- lm(first_yes_doy ~ ppt9 + individual_id,
+             data = filter(eaco, phenogroup == "flo"))
+summary(m_ppt9_flo) # Negative relationship between 9-month precip and open flower onset
+
+# For figures, predict effects for each tree, then predict for an "average" tree 
+# that has an intercept equal to the mean among observed trees
+eacoflom <- m_ppt6_flo
+# Get preds for each individual
+eacoflop <- predict_response(eacoflom, terms = c("ppt6", "individual_id"))
+
+# Calculate the mean across individuals for each x value
+# This creates a hypothetical individual with intercept = mean of all individuals
+eacoflop_m <- eacoflop %>%
+  group_by(x) %>%
+  summarise(
+    predicted = mean(predicted),
+    .groups = "drop"
+  )
+
+# Was going to include some CIs, but they are wide and make it tough to see
+# what's going on.
+eaco_flo_plot <- ggplot() +
+  geom_jitter(data = filter(eaco, phenogroup == "flo"), 
+              aes(x = ppt6, y = first_yes_doy, color = individual_id),
+              width = 0.5, height = 0.5, alpha = 0.7) +
+  # Individual prediction lines
+  geom_line(data = eacoflop, 
+            aes(x = x, y = predicted, group = group, color = group),
+            alpha = 0.8) +
+  # "Mean" individual prediction line
+  geom_line(data = eacoflop_m,
+            aes(x = x, y = predicted),
+            color = "black", linewidth = 1.5) +
+  labs(x = "Cumulative 6-month precipitation (mm)",
+       y = "Day of the year") +
+  facet_grid(~group_levels) +
+  theme_bw() +
+  theme(legend.position = "none",
+        panel.grid = element_blank())
+eaco_flo_plot
+# ggsave("output/climate-abq-eaco-flo.png",
+#        eaco_flo_plot,
+#        height = 4,
+#        width = 4,
+#        units = "in")
+
+# Leaves models (Singular fit warnings on all, so making individual a fixed effect)
+# Limit to first half of year
+eacolf <- eaco %>%
+  filter(phenogroup == "lf") %>%
+  filter(first_yes_doy < 182)
+
+m_tempwi_lf <- lm(first_yes_doy ~ tmean_wi + individual_id,
+                  data = eacolf)
+summary(m_tempwi_lf) # Negative relationship between winter temp and leaf out
+m_tempfa_lf <- lm(first_yes_doy ~ tmean_fa + individual_id,
+                  data = eacolf)
+summary(m_tempfa_lf)
+m_tempsu_lf <- lm(first_yes_doy ~ tmean_su + individual_id,
+                  data = eacolf)
+summary(m_tempsu_lf) # Positive relationship between summer temp and leaf out
+AIC(m_tempwi_lf, m_tempsu_lf)
+
+m_pptwi_lf <- lm(first_yes_doy ~ ppt_wi + individual_id,
+                 data = eacolf)
+summary(m_pptwi_lf)
+m_ppt6_lf <- lm(first_yes_doy ~ ppt6 + individual_id,
+                data = eacolf)
+summary(m_ppt6_lf)
+m_ppt9_lf <- lm(first_yes_doy ~ ppt9 + individual_id,
+                data = eacolf)
+summary(m_ppt9_lf)
+# Negative relationship between all precip metrics and leaf out.
+
+m_ppt6tempwi_lf <- lm(first_yes_doy ~ tmean_wi * ppt6 + individual_id,
+                      data = eacolf)
+summary(m_ppt6tempwi_lf)
+# Interaction between winter temps, 6-month precip (interaction not great, but
+# will keep in)
+
+# For figures, predict effects for each tree, then predict for an "average" tree 
+# that has an intercept equal to the mean among observed trees
+eacolfm <- m_ppt6tempwi_lf
+# Create data frame with original data, grouped by will mean temperatures
+eacolf_d <- eacolf %>%
+  mutate(tmean_wig = case_when(
+    tmean_wi < 3 ~ "Cool",
+    tmean_wi > 3 & tmean_wi < 4.1 ~ "Average",
+    tmean_wi > 4.1 ~ "Warm"
+  )) %>%
+  mutate(tmean_wig = factor(tmean_wig, 
+                            levels = c("Cool", "Average", "Warm"))) 
+tmean3 <- eacolf_d %>%
+  group_by(tmean_wig) %>%
+  summarize(tmean3 = round(mean(tmean_wi), 2)) %>%
+  data.frame()
+eacolf_d <- eacolf_d %>%
+  left_join(tmean3, by = "tmean_wig") %>%
+  data.frame() %>%
+  mutate(tmean3 = factor(tmean3))
+tmean3_vals <- tmean3$tmean3
+tmean3$tmean3 <- factor(tmean3$tmean3)
+
+# Get preds for each individual. This will produce predictions for every value
+# of ppt9 and 3 values of tmean_fa (mean - SD, mean, mean + SD)
+eacolfp <- predict_response(eacolfm, 
+                            terms = c("ppt6", "tmean_wi [tmean3_vals]", "individual_id"))
+# See what this looks like
+plot(eacolfp)
+
+# Calculate the mean across individuals for each x value
+# This creates a hypothetical individual with intercept = mean of all individuals
+eacolfp_m <- eacolfp %>%
+  group_by(x, group) %>%
+  summarise(
+    predicted = mean(predicted),
+    .groups = "drop"
+  ) %>%
+  mutate(label = "Leaves") %>%
+  left_join(tmean3, by = c("group" = "tmean3"))
+
+# Only plot predictions for hypothetical plant for 3 fall temperatures
+eaco_lf_plot <- ggplot() +
+  geom_jitter(data = eacolf_d,
+              aes(x = ppt6, y = first_yes_doy, color = tmean_wig),
+              width = 0.8, height = 0.8) +
+  # Mean predictions
+  geom_line(data = eacolfp_m, 
+            aes(x = x, y = predicted, color = tmean_wig),
+            alpha = 0.5) +
+  facet_grid(~label) +
+  scale_color_manual(values = c("cornflowerblue", "bisque3", "brown3")) +
+  labs(x = "Cumulative 6-month precipitation (mm)",
+       y = "Day of the year",
+       color = "Winter temp") +
+  theme_bw() +
+  theme(panel.grid = element_blank())
+eaco_lf_plot
+# ggsave("output/climate-abq-eaco-lf.png",
+#        eaco_lf_plot,
+#        height = 4,
+#        width = 6.5,
+#        units = "in")
+
+
+# Climate effects on spring phenology in stretchberry -------------------------#
+
+# Important note: for flowers 9 years, for open flowers 8 years, for leaves 10
+
+stbe <- stbe_gr %>%
+  filter(phenogroup %in% c("fl", "flo", "lf")) %>%
+  mutate(yr0 = yr - min(yr)) %>%
+  left_join(climm_sp, by = "yr") %>%
+  data.frame() %>%
+  mutate(ppt6 = ppt_fa + ppt_wi,
+         ppt9 = ppt6 + ppt_su) %>%
+  mutate(individual_id = factor(individual_id))
+
+# Flowers models (if including individual effects, make them fixed)
+m_tempwi_fl <- lm(first_yes_doy ~ tmean_wi + individual_id,
+                  data = filter(stbe, phenogroup == "fl"))
+summary(m_tempwi_fl)
+m_tempfa_fl <- lm(first_yes_doy ~ tmean_fa + individual_id,
+                  data = filter(stbe, phenogroup == "fl"))
+summary(m_tempfa_fl)
+m_tempsu_fl <- lm(first_yes_doy ~ tmean_su + individual_id,
+                  data = filter(stbe, phenogroup == "fl"))
+summary(m_tempsu_fl) # Summer temperatures positively associated with flower onset
+
+m_pptwi_fl <- lm(first_yes_doy ~ ppt_wi + individual_id,
+                 data = filter(stbe, phenogroup == "fl"))
+summary(m_pptwi_fl)
+m_ppt6_fl <- lm(first_yes_doy ~ ppt6 + individual_id,
+                data = filter(stbe, phenogroup == "fl"))
+summary(m_ppt6_fl) # 6-month precip negatively associated with flower onset
+m_ppt9_fl <- lm(first_yes_doy ~ ppt9 + individual_id,
+                data = filter(stbe, phenogroup == "fl"))
+summary(m_ppt9_fl)
+
+m_ppt6tempsu_fl <- lm(first_yes_doy ~ ppt6 * tmean_su + individual_id,
+                      data = filter(stbe, phenogroup == "fl"))
+summary(m_ppt6tempsu_fl) 
+# This model is worse. 
+# Precip model has much lower AIC
+AIC(m_ppt6_fl, m_tempsu_fl)
+
+# For figures, predict effects for each tree, then predict for an "average" tree 
+# that has an intercept equal to the mean among observed trees
+stbeflm <- m_ppt6_fl
+# Get preds for each individual
+stbeflp <- predict_response(stbeflm, terms = c("ppt6", "individual_id"))
+
+# Calculate the mean across individuals for each x value
+# This creates a hypothetical individual with intercept = mean of all individuals
+stbeflp_m <- stbeflp %>%
+  group_by(x) %>%
+  summarise(
+    predicted = mean(predicted),
+    .groups = "drop"
+  )
+
+# Plot
+stbe_fl_plot <- ggplot() +
+  geom_jitter(data = filter(stbe, phenogroup == "fl"), 
+              aes(x = ppt6, y = first_yes_doy, color = individual_id),
+              width = 0.5, height = 0.5, alpha = 0.7) +
+  # Individual prediction lines
+  geom_line(data = stbeflp, 
+            aes(x = x, y = predicted, group = group, color = group),
+            alpha = 0.8) +
+  # "Mean" individual prediction line
+  geom_line(data = stbeflp_m,
+            aes(x = x, y = predicted),
+            color = "black", linewidth = 1.5) +
+  labs(x = "Cumulative 6-month precipitation (mm)",
+       y = "Day of the year") +
+  facet_grid(~group_levels) +
+  theme_bw() +
+  theme(legend.position = "none",
+        panel.grid = element_blank())
+stbe_fl_plot
+# ggsave("output/climate-abq-stbe-fl.png",
+#        stbe_fl_plot,
+#        height = 4,
+#        width = 4,
+#        units = "in")
+
+
+# Open flowers models (if including individual effects, make them fixed)
+m_tempwi_flo <- lm(first_yes_doy ~ tmean_wi + individual_id,
+                  data = filter(stbe, phenogroup == "flo"))
+summary(m_tempwi_flo)
+m_tempfa_flo <- lm(first_yes_doy ~ tmean_fa + individual_id,
+                  data = filter(stbe, phenogroup == "flo"))
+summary(m_tempfa_flo)
+m_tempsu_flo <- lm(first_yes_doy ~ tmean_su + individual_id,
+                  data = filter(stbe, phenogroup == "flo"))
+summary(m_tempsu_flo)
+
+m_pptwi_flo <- lm(first_yes_doy ~ ppt_wi + individual_id,
+                 data = filter(stbe, phenogroup == "flo"))
+summary(m_pptwi_flo)
+m_ppt6_flo <- lm(first_yes_doy ~ ppt6 + individual_id,
+                data = filter(stbe, phenogroup == "flo"))
+summary(m_ppt6_flo) # 6-month precip negatively associated with floower onset
+m_ppt9_flo <- lm(first_yes_doy ~ ppt9 + individual_id,
+                data = filter(stbe, phenogroup == "flo"))
+summary(m_ppt9_flo)
+# Nothing significant
+
+
+# Leaves models (if including individual effects, make them fixed)
+# Limit to first half of year
+stbelf <- stbe %>%
+  filter(phenogroup == "lf") %>%
+  filter(first_yes_doy < 182)
+
+m_tempwi_lf <- lm(first_yes_doy ~ tmean_wi + individual_id,
+                  data = stbelf)
+summary(m_tempwi_lf) # Negative relationship between winter temp and leaf out
+m_tempfa_lf <- lm(first_yes_doy ~ tmean_fa + individual_id,
+                  data = stbelf)
+summary(m_tempfa_lf) # Negative relationship between fall temp and leaf out
+m_tempsu_lf <- lm(first_yes_doy ~ tmean_su + individual_id,
+                  data = stbelf)
+summary(m_tempsu_lf) 
+AIC(m_tempwi_lf, m_tempfa_lf) # Winter better
+
+m_pptwi_lf <- lm(first_yes_doy ~ ppt_wi + individual_id,
+                 data = stbelf)
+summary(m_pptwi_lf)
+m_ppt6_lf <- lm(first_yes_doy ~ ppt6 + individual_id,
+                data = stbelf)
+summary(m_ppt6_lf)
+m_ppt9_lf <- lm(first_yes_doy ~ ppt9 + individual_id,
+                data = stbelf)
+summary(m_ppt9_lf)
+# Negative relationship between winter and 6-mo precip metrics and leaf out.
+AIC(m_pptwi_lf, m_ppt6_lf) # 6-month better
+
+m_ppt6tempwi_lf <- lm(first_yes_doy ~ tmean_wi + ppt6 + individual_id,
+                      data = stbelf)
+summary(m_ppt6tempwi_lf)
+# Better (but not with an interaction!)
+
+# For figures, predict effects for each tree, then predict for an "average" tree 
+# that has an intercept equal to the mean among observed trees
+stbelfm <- m_ppt6tempwi_lf
+# Create data frame with original data, grouped by will mean temperatures
+stbelf_d <- stbelf %>%
+  mutate(tmean_wig = case_when(
+    tmean_wi < 3 ~ "Cool",
+    tmean_wi > 3 & tmean_wi < 4.1 ~ "Average",
+    tmean_wi > 4.1 ~ "Warm"
+  )) %>%
+  mutate(tmean_wig = factor(tmean_wig, 
+                            levels = c("Cool", "Average", "Warm"))) 
+tmean3 <- stbelf_d %>%
+  group_by(tmean_wig) %>%
+  summarize(tmean3 = round(mean(tmean_wi), 2)) %>%
+  data.frame()
+stbelf_d <- stbelf_d %>%
+  left_join(tmean3, by = "tmean_wig") %>%
+  data.frame() %>%
+  mutate(tmean3 = factor(tmean3))
+tmean3_vals <- tmean3$tmean3
+tmean3$tmean3 <- factor(tmean3$tmean3)
+
+# Get preds for each individual. This will produce predictions for every value
+# of ppt9 and 3 values of tmean_fa (mean - SD, mean, mean + SD)
+stbelfp <- predict_response(stbelfm, 
+                            terms = c("ppt6", "tmean_wi [tmean3_vals]", "individual_id"))
+# See what this looks like
+plot(stbelfp)
+
+# Calculate the mean across individuals for each x value
+# This creates a hypothetical individual with intercept = mean of all individuals
+stbelfp_m <- stbelfp %>%
+  group_by(x, group) %>%
+  summarise(
+    predicted = mean(predicted),
+    .groups = "drop"
+  ) %>%
+  mutate(label = "Leaves") %>%
+  left_join(tmean3, by = c("group" = "tmean3"))
+
+# Only plot predictions for hypothetical plant for 3 fall temperatures
+stbe_lf_plot <- ggplot() +
+  geom_jitter(data = stbelf_d,
+              aes(x = ppt6, y = first_yes_doy, color = tmean_wig),
+              width = 0.8, height = 0.8) +
+  # Mean predictions
+  geom_line(data = stbelfp_m, 
+            aes(x = x, y = predicted, color = tmean_wig),
+            alpha = 0.5) +
+  facet_grid(~label) +
+  scale_color_manual(values = c("cornflowerblue", "bisque3", "brown3")) +
+  labs(x = "Cumulative 6-month precipitation (mm)",
+       y = "Day of the year",
+       color = "Winter temp") +
+  theme_bw() +
+  theme(panel.grid = element_blank())
+stbe_lf_plot
+# ggsave("output/climate-abq-stbe-lf.png",
+#        stbe_lf_plot,
+#        height = 4,
+#        width = 6.5,
+#        units = "in")
+
+
+# Climate effects on spring phenology in saltbush -----------------------------#
+
+# Both flower phenophases observed in 6 individuals over 11 years
+# (could probably use random effects for plants, but won't to keep things 
+# the same as above)
+
+fwsa <- fwsa_gr %>%
+  filter(phenogroup %in% c("fl", "flo")) 
+fwsa <- fwsa %>%
+  mutate(yr = as.numeric(yr)) %>%
+  mutate(yr0 = yr - min(yr)) %>%
+  left_join(climm_sp, by = "yr") %>%
+  data.frame() %>%
+  mutate(ppt6 = ppt_fa + ppt_wi,
+         ppt9 = ppt6 + ppt_su) %>%
+  mutate(individual_id = factor(individual_id))
+
+# Flowers models (if including individual effects, make them fixed)
+m_tempwi_fl <- lm(first_yes_doy ~ tmean_wi + individual_id,
+                  data = filter(fwsa, phenogroup == "fl"))
+summary(m_tempwi_fl) # Winter temperatures have negative association with flower onset
+m_tempfa_fl <- lm(first_yes_doy ~ tmean_fa + individual_id,
+                  data = filter(fwsa, phenogroup == "fl"))
+summary(m_tempfa_fl)
+m_tempsu_fl <- lm(first_yes_doy ~ tmean_su + individual_id,
+                  data = filter(fwsa, phenogroup == "fl"))
+summary(m_tempsu_fl) 
+
+m_pptwi_fl <- lm(first_yes_doy ~ ppt_wi + individual_id,
+                 data = filter(fwsa, phenogroup == "fl"))
+summary(m_pptwi_fl)
+m_ppt6_fl <- lm(first_yes_doy ~ ppt6 + individual_id,
+                data = filter(fwsa, phenogroup == "fl"))
+summary(m_ppt6_fl) # 6-month precip negatively associated with flower onset
+m_ppt9_fl <- lm(first_yes_doy ~ ppt9 + individual_id,
+                data = filter(fwsa, phenogroup == "fl"))
+summary(m_ppt9_fl) # 9-month precip negatively associated with flower onset
+
+m_ppt6tempwi_fl <- lm(first_yes_doy ~ ppt6 * tmean_wi + individual_id,
+                      data = filter(fwsa, phenogroup == "fl"))
+summary(m_ppt6tempwi_fl) 
+# Yup, both important
+
+# For figures, predict effects for each tree, then predict for an "average" tree 
+# that has an intercept equal to the mean among observed trees
+fwsaflm <- m_ppt6tempwi_fl
+# Create data frame with original data, grouped by will mean temperatures
+fwsafl_d <- fwsa %>%
+  filter(phenogroup == "fl") %>%
+  mutate(tmean_wig = case_when(
+    tmean_wi < 3 ~ "Cool",
+    tmean_wi > 3 & tmean_wi < 4.1 ~ "Average",
+    tmean_wi > 4.1 ~ "Warm"
+  )) %>%
+  mutate(tmean_wig = factor(tmean_wig, 
+                            levels = c("Cool", "Average", "Warm"))) 
+tmean3 <- fwsafl_d %>%
+  group_by(tmean_wig) %>%
+  summarize(tmean3 = round(mean(tmean_wi), 2)) %>%
+  data.frame()
+fwsafl_d <- fwsafl_d %>%
+  left_join(tmean3, by = "tmean_wig") %>%
+  data.frame() %>%
+  mutate(tmean3 = factor(tmean3))
+tmean3_vals <- tmean3$tmean3
+tmean3$tmean3 <- factor(tmean3$tmean3)
+
+# Get preds for each individual. This will produce predictions for every value
+# of ppt9 and 3 values of tmean_fa (mean - SD, mean, mean + SD)
+fwsaflp <- predict_response(fwsaflm, 
+                            terms = c("ppt6", "tmean_wi [tmean3_vals]", "individual_id"))
+# See what this looks like
+plot(fwsaflp)
+
+# Calculate the mean across individuals for each x value
+# This creates a hypothetical individual with intercept = mean of all individuals
+fwsaflp_m <- fwsaflp %>%
+  group_by(x, group) %>%
+  summarise(
+    predicted = mean(predicted),
+    .groups = "drop"
+  ) %>%
+  mutate(label = "Flowers") %>%
+  left_join(tmean3, by = c("group" = "tmean3"))
+
+# Only plot predictions for hypothetical plant for 3 fall temperatures
+fwsa_fl_plot <- ggplot() +
+  geom_jitter(data = fwsafl_d,
+              aes(x = ppt6, y = first_yes_doy, color = tmean_wig),
+              width = 0.8, height = 0.8) +
+  # Mean predictions
+  geom_line(data = fwsaflp_m, 
+            aes(x = x, y = predicted, color = tmean_wig),
+            alpha = 0.5) +
+  facet_grid(~label) +
+  scale_color_manual(values = c("cornflowerblue", "bisque3", "brown3")) +
+  labs(x = "Cumulative 6-month precipitation (mm)",
+       y = "Day of the year",
+       color = "Winter temp") +
+  theme_bw() +
+  theme(panel.grid = element_blank())
+fwsa_fl_plot
+# ggsave("output/climate-abq-fwsa-fl.png",
+#        fwsa_fl_plot,
+#        height = 4,
+#        width = 6.5,
+#        units = "in")
+
+
+# Open flowers models (if including individual effects, make them fixed)
+m_tempwi_flo <- lm(first_yes_doy ~ tmean_wi + individual_id,
+                   data = filter(fwsa, phenogroup == "flo"))
+summary(m_tempwi_flo) # Winter temperatures have negative association with flower onset
+m_tempfa_flo <- lm(first_yes_doy ~ tmean_fa + individual_id,
+                   data = filter(fwsa, phenogroup == "flo"))
+summary(m_tempfa_flo)
+m_tempsu_flo <- lm(first_yes_doy ~ tmean_su + individual_id,
+                   data = filter(fwsa, phenogroup == "flo"))
+summary(m_tempsu_flo)
+
+m_pptwi_flo <- lm(first_yes_doy ~ ppt_wi + individual_id,
+                  data = filter(fwsa, phenogroup == "flo"))
+summary(m_pptwi_flo)
+m_ppt6_flo <- lm(first_yes_doy ~ ppt6 + individual_id,
+                 data = filter(fwsa, phenogroup == "flo"))
+summary(m_ppt6_flo)
+m_ppt9_flo <- lm(first_yes_doy ~ ppt9 + individual_id,
+                 data = filter(fwsa, phenogroup == "flo"))
+summary(m_ppt9_flo)
+
+# For figures, predict effects for each tree, then predict for an "average" tree 
+# that has an intercept equal to the mean among observed trees
+fwsaflom <- m_tempwi_flo
+# Get preds for each individual
+fwsaflop <- predict_response(fwsaflom, terms = c("tmean_wi", "individual_id"))
+
+# Calculate the mean across individuals for each x value
+# This creates a hypothetical individual with intercept = mean of all individuals
+fwsaflop_m <- fwsaflop %>%
+  group_by(x) %>%
+  summarise(
+    predicted = mean(predicted),
+    .groups = "drop"
+  )
+
+# Plot
+fwsa_flo_plot <- ggplot() +
+  geom_jitter(data = filter(fwsa, phenogroup == "flo"), 
+              aes(x = tmean_wi, y = first_yes_doy, color = individual_id),
+              width = 0.1, height = 0.1, alpha = 0.7) +
+  # Individual prediction lines
+  geom_line(data = fwsaflop, 
+            aes(x = x, y = predicted, group = group, color = group),
+            alpha = 0.8) +
+  # "Mean" individual prediction line
+  geom_line(data = fwsaflop_m,
+            aes(x = x, y = predicted),
+            color = "black", linewidth = 1.5) +
+  labs(x = "Mean winter temperature (deg C)",
+       y = "Day of the year") +
+  facet_grid(~group_levels) +
+  theme_bw() +
+  theme(legend.position = "none",
+        panel.grid = element_blank())
+fwsa_flo_plot
+# ggsave("output/climate-abq-fwsa-flo.png",
+#        fwsa_flo_plot,
+#        height = 4,
+#        width = 4,
+#        units = "in")
+
