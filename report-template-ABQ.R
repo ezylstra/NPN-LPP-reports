@@ -14,13 +14,8 @@ require(terra)
 require(lme4)
 require(ggeffects) # Predictions & plotting for mixed-effect models
 require(emmeans)
-# require(lmerTest) # Don't want to load this (but will call in script)
 
 source("geom_abs_text.R")
-
-# require(geosphere) # for optional site clustering
-# require(fpc) # for optional site clustering
-# require(RColorBrewer)
 
 #- Specify data of interest ---------------------------------------------------#
 # Name and nickname of LPP
@@ -931,8 +926,8 @@ for (i in 1:n_plots) {
                           size = n_obs, color = phenogroup_f), alpha = pt_alpha) +
            scale_size_continuous(range = c(0.5, 4), limits = c(0, 40),
                                  breaks = seq(10, 40, by = 10)) +
-           geom_line(data = pg_preds4, 
-                     aes(x = x, y = y01, color = phenogroup_f)) +
+           geom_line(data = pg_preds4,
+                     aes(x = x, y = y01, color = phenogroup_f), size = NULL) +
            scale_color_manual(values = color_vec) +
            scale_x_continuous(limits = c(min(x_tick_doy), max(x_tick_doy)),
                               # expand = c(0, 0),
@@ -1822,18 +1817,17 @@ php_match <- eaco_gr %>%
                   aes(xpos = 0.95, ypos = 0.97, label = label, hjust = 1, vjust = 1,
                   family = "sans", x = NULL, y = NULL), size = text_size/.pt) +
     labs(x = "Year",
-         y = "First observation day of year", 
+         y = 'First "yes" day of year', 
          color = "Phenophase",
          fill = "Phenophase") +
     theme_bw() +
-    theme(axis.title.x = element_blank(),
-          panel.grid.major = element_blank(),
+    theme(panel.grid.major = element_blank(),
           panel.grid.minor = element_blank(), 
           legend.position = "none",
           axis.text.x = element_text(size = text_size), 
           axis.text.y = element_text(size = text_size),
           strip.text = element_text(size = text_size),
-          axis.title.y = element_text(size = text_size + 1))
+          axis.title = element_text(size = text_size + 1))
     # ggsave("output/trends-plot-abq-eaco.png",
     #        trends_eaco,
     #        width = 6.5,
@@ -1905,18 +1899,17 @@ php_match <- eaco_gr %>%
                   aes(xpos = 0.95, ypos = 0.97, label = label, hjust = 1, vjust = 1,
                       family = "sans", x = NULL, y = NULL), size = text_size/.pt) +
     labs(x = "Year",
-         y = "First observation day of year", 
+         y = 'First "yes" day of year', 
          color = "Phenophase",
          fill = "Phenophase") +
     theme_bw() +
-    theme(axis.title.x = element_blank(),
-          panel.grid.major = element_blank(),
+    theme(panel.grid.major = element_blank(),
           panel.grid.minor = element_blank(), 
           legend.position = "none",
           axis.text.x = element_text(size = text_size), 
           axis.text.y = element_text(size = text_size),
           strip.text = element_text(size = text_size),
-          axis.title.y = element_text(size = text_size + 1))
+          axis.title = element_text(size = text_size + 1))
   # ggsave("output/trends-plot-abq-fwsa.png",
   #        trends_fwsa,
   #        width = 6.5,
@@ -1989,18 +1982,17 @@ php_match <- eaco_gr %>%
                   aes(xpos = 0.95, ypos = 0.97, label = label, hjust = 1, vjust = 1,
                       family = "sans", x = NULL, y = NULL), size = text_size/.pt) +
     labs(x = "Year",
-         y = "First observation day of year", 
+         y = 'First "yes" day of year', 
          color = "Phenophase",
          fill = "Phenophase") +
     theme_bw() +
-    theme(axis.title.x = element_blank(),
-          panel.grid.major = element_blank(),
+    theme(panel.grid.major = element_blank(),
           panel.grid.minor = element_blank(), 
           legend.position = "none",
           axis.text.x = element_text(size = text_size), 
           axis.text.y = element_text(size = text_size),
           strip.text = element_text(size = text_size),
-          axis.title.y = element_text(size = text_size + 1))
+          axis.title = element_text(size = text_size + 1))
   # ggsave("output/trends-plot-abq-stbe.png",
   #        trends_stbe,
   #        width = 6.5,
@@ -2127,7 +2119,7 @@ summary(m_ppt6_fl)
 m_ppt9_fl <- lm(first_yes_doy ~ ppt9 + individual_id,
               data = filter(eaco, phenogroup == "fl"))
 summary(m_ppt9_fl)
-# Nothing close to significant
+# Nothing significant
 
 
 # Open flowers models (if including individual effects, make them fixed)
@@ -2181,7 +2173,7 @@ eaco_flo_plot <- ggplot() +
             aes(x = x, y = predicted),
             color = "black", linewidth = 1.5) +
   labs(x = "Cumulative 6-month precipitation (mm)",
-       y = "Day of the year") +
+       y = 'First "yes" day of year') +
   facet_grid(~group_levels) +
   theme_bw() +
   theme(legend.position = "none",
@@ -2280,7 +2272,7 @@ eaco_lf_plot <- ggplot() +
   facet_grid(~label) +
   scale_color_manual(values = c("cornflowerblue", "bisque3", "brown3")) +
   labs(x = "Cumulative 6-month precipitation (mm)",
-       y = "Day of the year",
+       y = 'First "yes" day of year',
        color = "Winter temp") +
   theme_bw() +
   theme(panel.grid = element_blank())
@@ -2362,7 +2354,7 @@ stbe_fl_plot <- ggplot() +
             aes(x = x, y = predicted),
             color = "black", linewidth = 1.5) +
   labs(x = "Cumulative 6-month precipitation (mm)",
-       y = "Day of the year") +
+       y = 'First "yes" day of year') +
   facet_grid(~group_levels) +
   theme_bw() +
   theme(legend.position = "none",
@@ -2485,7 +2477,7 @@ stbe_lf_plot <- ggplot() +
   facet_grid(~label) +
   scale_color_manual(values = c("cornflowerblue", "bisque3", "brown3")) +
   labs(x = "Cumulative 6-month precipitation (mm)",
-       y = "Day of the year",
+       y = 'First "yes" day of year',
        color = "Winter temp") +
   theme_bw() +
   theme(panel.grid = element_blank())
@@ -2594,7 +2586,7 @@ fwsa_fl_plot <- ggplot() +
   facet_grid(~label) +
   scale_color_manual(values = c("cornflowerblue", "bisque3", "brown3")) +
   labs(x = "Cumulative 6-month precipitation (mm)",
-       y = "Day of the year",
+       y = 'First "yes" day of year',
        color = "Winter temp") +
   theme_bw() +
   theme(panel.grid = element_blank())
@@ -2656,7 +2648,7 @@ fwsa_flo_plot <- ggplot() +
             aes(x = x, y = predicted),
             color = "black", linewidth = 1.5) +
   labs(x = "Mean winter temperature (deg C)",
-       y = "Day of the year") +
+       y = 'First "yes" day of year') +
   facet_grid(~group_levels) +
   theme_bw() +
   theme(legend.position = "none",
